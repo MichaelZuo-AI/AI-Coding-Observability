@@ -4,6 +4,7 @@ import os
 import sys
 from datetime import datetime
 from .models import ActivityBlock
+from .codegen import CodeGenStats
 
 CATEGORY_ORDER = ["coding", "debug", "design", "devops", "review", "other"]
 BAR_WIDTH = 20
@@ -60,10 +61,63 @@ def _bar(fraction: float, category: str, width: int = BAR_WIDTH) -> str:
     return bar_filled + bar_empty
 
 
+def format_codegen_section(
+    stats: CodeGenStats,
+    project_stats: dict[str, CodeGenStats] | None = None,
+) -> str:
+    """Generate the AI Code Generation section of the report."""
+    lines: list[str] = []
+
+    GREEN = CATEGORY_COLORS["coding"]
+
+    lines.append(f"  {_c(BOLD, 'AI Code Generation')}")
+    lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
+
+    lines.append(f"  {_c(DIM, 'Files created')}       {_c(BOLD, str(stats.files_created)):>8}")
+    lines.append(f"  {_c(DIM, 'Files edited')}        {_c(BOLD, str(stats.files_edited)):>8}")
+    lines.append(f"  {_c(DIM, 'Files touched')}       {_c(BOLD, str(len(stats.files_touched))):>8}")
+    lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
+    lines.append(f"  {_c(DIM, 'Lines written')}  {_c(GREEN, '(new)')}{_c(BOLD, f'{stats.total_lines_written:>8,}')}")
+    lines.append(f"  {_c(DIM, 'Lines added')}    {_c(GREEN, '(edit)')}{_c(BOLD, f'{stats.total_lines_added:>7,}')}")
+    lines.append(f"  {_c(DIM, 'Lines removed')}  {_c(CATEGORY_COLORS['debug'], '(edit)')}{_c(BOLD, f'{stats.total_lines_removed:>7,}')}")
+    lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
+    lines.append(f"  {_c(BOLD, 'Total AI lines')}      {_c(BOLD + ACCENT_COLOR, f'{stats.total_ai_lines:>8,}')}")
+    lines.append(f"  {_c(BOLD, 'Net lines')}           {_c(BOLD + GREEN, f'{stats.net_lines:>8,}')}")
+    lines.append("")
+
+    # Per-project breakdown
+    if project_stats:
+        lines.append(f"  {_c(BOLD, 'AI Lines by Project')}")
+        lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
+
+        sorted_projects = sorted(
+            project_stats.items(),
+            key=lambda x: x[1].total_ai_lines,
+            reverse=True,
+        )
+        for proj_name, pstats in sorted_projects[:10]:
+            if pstats.total_ai_lines == 0:
+                continue
+            total = f"{pstats.total_ai_lines:,}"
+            net = f"+{pstats.net_lines:,}" if pstats.net_lines >= 0 else f"{pstats.net_lines:,}"
+            files = len(pstats.files_touched)
+            lines.append(
+                f"  {_c(HEADER_COLOR, f'{proj_name:<20}')} "
+                f"{_c(BOLD, f'{total:>7}')} lines  "
+                f"{_c(GREEN, f'{net:>7}')} net  "
+                f"{_c(DIM, f'{files} files')}"
+            )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def print_report(
     blocks: list[ActivityBlock],
     from_date: datetime | None = None,
     to_date: datetime | None = None,
+    codegen_stats: CodeGenStats | None = None,
+    codegen_by_project: dict[str, CodeGenStats] | None = None,
 ) -> str:
     """Generate and return the full CLI report string."""
     if not blocks:
@@ -159,5 +213,9 @@ def print_report(
             lines.append(f"  {_c(HEADER_COLOR, f'{proj_name:<20}')} {_c(BOLD, f'{dur:>5}')}  {cat_str}")
 
         lines.append("")
+
+    # AI Code Generation section
+    if codegen_stats and codegen_stats.total_ai_lines > 0:
+        lines.append(format_codegen_section(codegen_stats, codegen_by_project))
 
     return "\n".join(lines)

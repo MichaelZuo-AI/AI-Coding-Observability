@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .parser import parse_all_sessions, CLAUDE_PROJECTS_DIR
 from .aggregator import build_activity_blocks
+from .codegen import analyze_codegen, analyze_codegen_by_project
 from .reporter import print_report
 
 
@@ -42,7 +43,10 @@ def cmd_report(args: argparse.Namespace) -> None:
         blocks = build_activity_blocks(session)
         all_blocks.extend(blocks)
 
-    report = print_report(all_blocks, from_date, to_date)
+    codegen_stats = analyze_codegen(projects_dir, project_filter=args.project)
+    codegen_by_project = analyze_codegen_by_project(projects_dir) if not args.project else None
+
+    report = print_report(all_blocks, from_date, to_date, codegen_stats, codegen_by_project)
     print(report)
 
 
