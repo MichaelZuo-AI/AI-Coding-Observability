@@ -1,6 +1,7 @@
 """Parse Claude Code JSONL session logs into structured Session objects."""
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -187,11 +188,16 @@ def parse_all_sessions(
     projects_dir: Path = CLAUDE_PROJECTS_DIR,
     project_filter: str | None = None,
 ) -> list[Session]:
-    """Parse all session files and return valid sessions."""
+    """Parse all session files in parallel and return valid sessions."""
     paths = discover_sessions(projects_dir, project_filter)
+    if not paths:
+        return []
+
     sessions = []
-    for path in paths:
-        session = parse_session(path)
-        if session is not None:
-            sessions.append(session)
+    with ThreadPoolExecutor() as executor:
+        futures = {executor.submit(parse_session, path): path for path in paths}
+        for future in as_completed(futures):
+            session = future.result()
+            if session is not None:
+                sessions.append(session)
     return sessions

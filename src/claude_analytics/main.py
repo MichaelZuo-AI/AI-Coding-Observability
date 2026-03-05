@@ -58,8 +58,8 @@ def cmd_report(args: argparse.Namespace) -> None:
         all_blocks.extend(blocks)
 
     _progress("Analyzing git repos")
-    codegen_stats = analyze_codegen(projects_dir, project_filter=args.project)
-    codegen_by_project = analyze_codegen_by_project(projects_dir) if not args.project else None
+    codegen_stats = analyze_codegen(projects_dir, project_filter=args.project, sessions=sessions)
+    codegen_by_project = analyze_codegen_by_project(projects_dir, sessions=sessions) if not args.project else None
 
     _progress_done()
     report = print_report(all_blocks, from_date, to_date, codegen_stats, codegen_by_project)

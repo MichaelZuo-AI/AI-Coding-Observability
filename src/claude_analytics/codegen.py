@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -100,13 +101,9 @@ def _find_git_root(path: Path) -> Path:
 
 
 def _extract_session_windows(
-    projects_dir: Path,
-    project_filter: str | None = None,
+    sessions: list,
 ) -> list[tuple[datetime, datetime]]:
-    """Extract (start, end) time windows from all sessions."""
-    from .parser import parse_all_sessions
-
-    sessions = parse_all_sessions(projects_dir, project_filter)
+    """Extract (start, end) time windows from pre-parsed sessions."""
     windows = []
     for session in sessions:
         if session.start_time and session.end_time:
@@ -202,46 +199,68 @@ def _get_git_commits(git_root: Path) -> list[tuple[str, datetime, list[tuple[int
 def analyze_codegen(
     projects_dir: Path = CLAUDE_PROJECTS_DIR,
     project_filter: str | None = None,
+    sessions: list | None = None,
 ) -> CodeGenStats:
-    """Analyze AI code generation across all projects using git + session matching."""
+    """Analyze AI code generation across all projects using git + session matching.
+
+    Accepts pre-parsed sessions to avoid redundant JSONL parsing.
+    """
     project_dirs = extract_project_dirs(projects_dir)
-    session_windows = _extract_session_windows(projects_dir, project_filter)
+
+    if sessions is None:
+        from .parser import parse_all_sessions
+        sessions = parse_all_sessions(projects_dir, project_filter)
+
+    session_windows = _extract_session_windows(sessions)
     merged_windows = _merge_windows(session_windows)
 
-    stats = CodeGenStats()
-
+    # Deduplicate repos and filter
     seen_repos: set[str] = set()
+    repos_to_analyze: list[tuple[str, Path]] = []
     for proj_name, git_root in project_dirs.items():
         repo_key = str(git_root)
         if repo_key in seen_repos:
             continue
         seen_repos.add(repo_key)
-
         if project_filter and project_filter not in proj_name:
             continue
+        repos_to_analyze.append((proj_name, git_root))
 
-        proj_stats = _analyze_repo(git_root, merged_windows)
-        stats.ai_lines += proj_stats.ai_lines
-        stats.total_lines += proj_stats.total_lines
-        stats.ai_commits += proj_stats.ai_commits
-        stats.total_commits += proj_stats.total_commits
-        stats.files_touched.update(proj_stats.files_touched)
+    stats = CodeGenStats()
+
+    # Analyze repos in parallel
+    with ThreadPoolExecutor() as executor:
+        futures = {
+            executor.submit(_analyze_repo, git_root, merged_windows): proj_name
+            for proj_name, git_root in repos_to_analyze
+        }
+        for future in as_completed(futures):
+            proj_stats = future.result()
+            stats.ai_lines += proj_stats.ai_lines
+            stats.total_lines += proj_stats.total_lines
+            stats.ai_commits += proj_stats.ai_commits
+            stats.total_commits += proj_stats.total_commits
+            stats.files_touched.update(proj_stats.files_touched)
 
     return stats
 
 
 def analyze_codegen_by_project(
     projects_dir: Path = CLAUDE_PROJECTS_DIR,
+    sessions: list | None = None,
 ) -> dict[str, CodeGenStats]:
-    """Analyze code generation per project."""
+    """Analyze code generation per project.
+
+    Accepts pre-parsed sessions to avoid redundant JSONL parsing.
+    """
     project_dirs = extract_project_dirs(projects_dir)
 
-    # Get per-project session windows
-    from .parser import _extract_project_name, parse_all_sessions
-    all_sessions = parse_all_sessions(projects_dir)
+    if sessions is None:
+        from .parser import parse_all_sessions
+        sessions = parse_all_sessions(projects_dir)
 
     project_sessions: dict[str, list[tuple[datetime, datetime]]] = {}
-    for session in all_sessions:
+    for session in sessions:
         if session.start_time and session.end_time:
             proj = session.project
             if proj not in project_sessions:
@@ -250,11 +269,18 @@ def analyze_codegen_by_project(
             end = session.end_time + timedelta(minutes=SESSION_BUFFER_MINUTES)
             project_sessions[proj].append((start, end))
 
+    # Analyze all repos in parallel
     result: dict[str, CodeGenStats] = {}
-    for proj_name, git_root in project_dirs.items():
-        windows = project_sessions.get(proj_name, [])
-        merged = _merge_windows(windows)
-        result[proj_name] = _analyze_repo(git_root, merged)
+    with ThreadPoolExecutor() as executor:
+        futures = {}
+        for proj_name, git_root in project_dirs.items():
+            windows = project_sessions.get(proj_name, [])
+            merged = _merge_windows(windows)
+            futures[executor.submit(_analyze_repo, git_root, merged)] = proj_name
+
+        for future in as_completed(futures):
+            proj_name = futures[future]
+            result[proj_name] = future.result()
 
     return result
 
@@ -270,22 +296,6 @@ def _analyze_repo(
     commits = _get_git_commits(git_root)
     stats.total_commits = len(commits)
 
-    for commit_hash, commit_time, file_stats in commits:
-        is_ai = _is_during_session(commit_time, session_windows)
-
-        for added, removed, filepath in file_stats:
-            if not _is_code_file(filepath):
-                continue
-
-            if is_ai:
-                stats.ai_lines += added
-                stats.ai_commits += 1
-                stats.files_touched.add(filepath)
-                break  # count commit once, not per file
-
-    # Re-count ai_lines properly (the break above was wrong)
-    stats.ai_lines = 0
-    stats.ai_commits = 0
     for commit_hash, commit_time, file_stats in commits:
         if not _is_during_session(commit_time, session_windows):
             continue
