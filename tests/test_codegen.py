@@ -1,73 +1,18 @@
 """Tests for AI code generation analysis."""
 
-import json
+import subprocess
 import pytest
 from pathlib import Path
 from claude_analytics.codegen import (
-    analyze_codegen,
     _is_code_file,
-    _count_lines,
+    count_codebase_lines,
+    _merge_windows,
+    _is_during_session,
+    _get_git_commits,
+    _analyze_repo,
     CodeGenStats,
 )
-
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
-
-
-@pytest.fixture
-def codegen_fixture(tmp_path):
-    """Create a fixture JSONL with Write/Edit tool calls."""
-    project_dir = tmp_path / "test-project"
-    project_dir.mkdir()
-
-    lines = [
-        # Write a new Python file
-        json.dumps({
-            "type": "assistant",
-            "timestamp": "2026-02-10T10:00:05.000Z",
-            "message": {
-                "role": "assistant",
-                "content": [
-                    {"type": "tool_use", "id": "t1", "name": "Write", "input": {
-                        "file_path": "/test/app.py",
-                        "content": "def hello():\n    print('hello')\n\ndef main():\n    hello()\n",
-                    }},
-                ],
-            },
-        }),
-        # Edit an existing file
-        json.dumps({
-            "type": "assistant",
-            "timestamp": "2026-02-10T10:05:05.000Z",
-            "message": {
-                "role": "assistant",
-                "content": [
-                    {"type": "tool_use", "id": "t2", "name": "Edit", "input": {
-                        "file_path": "/test/app.py",
-                        "old_string": "def hello():\n    print('hello')",
-                        "new_string": "def hello(name: str):\n    print(f'hello {name}')\n    return name",
-                    }},
-                ],
-            },
-        }),
-        # Write a markdown file (should be skipped)
-        json.dumps({
-            "type": "assistant",
-            "timestamp": "2026-02-10T10:10:05.000Z",
-            "message": {
-                "role": "assistant",
-                "content": [
-                    {"type": "tool_use", "id": "t3", "name": "Write", "input": {
-                        "file_path": "/test/README.md",
-                        "content": "# Hello\nThis is a readme\n",
-                    }},
-                ],
-            },
-        }),
-    ]
-
-    filepath = project_dir / "codegen-session.jsonl"
-    filepath.write_text("\n".join(lines) + "\n")
-    return tmp_path
+from datetime import datetime, timezone, timedelta
 
 
 class TestIsCodeFile:
@@ -89,46 +34,136 @@ class TestIsCodeFile:
     def test_empty_path(self):
         assert _is_code_file("") is False
 
+    def test_lock_files_skipped(self):
+        assert _is_code_file("/project/package-lock.json") is False
+        assert _is_code_file("/project/yarn.lock") is False
 
-class TestCountLines:
-    def test_basic(self):
-        assert _count_lines("a\nb\nc") == 3
-
-    def test_empty_lines_excluded(self):
-        assert _count_lines("a\n\nb\n\n") == 2
-
-    def test_empty_string(self):
-        assert _count_lines("") == 0
+    def test_jsx_tsx(self):
+        assert _is_code_file("/src/App.tsx") is True
+        assert _is_code_file("/src/Button.jsx") is True
 
 
-class TestAnalyzeCodegen:
-    def test_counts_write(self, codegen_fixture):
-        stats = analyze_codegen(codegen_fixture)
-        # 4 non-empty lines in app.py Write (trailing newline = empty last line)
-        assert stats.total_lines_written == 4
-        assert stats.files_created == 1
+class TestMergeWindows:
+    def test_no_overlap(self):
+        t1 = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
+        t2 = datetime(2026, 2, 10, 11, 0, tzinfo=timezone.utc)
+        t3 = datetime(2026, 2, 10, 14, 0, tzinfo=timezone.utc)
+        t4 = datetime(2026, 2, 10, 15, 0, tzinfo=timezone.utc)
+        result = _merge_windows([(t1, t2), (t3, t4)])
+        assert len(result) == 2
 
-    def test_counts_edit(self, codegen_fixture):
-        stats = analyze_codegen(codegen_fixture)
-        # Edit: 2 old lines -> 3 new lines
-        assert stats.total_lines_removed == 2
-        assert stats.total_lines_added == 3
-        assert stats.files_edited == 1
+    def test_overlap(self):
+        t1 = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
+        t2 = datetime(2026, 2, 10, 11, 0, tzinfo=timezone.utc)
+        t3 = datetime(2026, 2, 10, 10, 30, tzinfo=timezone.utc)
+        t4 = datetime(2026, 2, 10, 12, 0, tzinfo=timezone.utc)
+        result = _merge_windows([(t1, t2), (t3, t4)])
+        assert len(result) == 1
+        assert result[0] == (t1, t4)
 
-    def test_skips_markdown(self, codegen_fixture):
-        stats = analyze_codegen(codegen_fixture)
-        # Only 1 Write (py) counted, not the README.md
-        assert stats.files_created == 1
+    def test_empty(self):
+        assert _merge_windows([]) == []
 
-    def test_total_ai_lines(self, codegen_fixture):
-        stats = analyze_codegen(codegen_fixture)
-        assert stats.total_ai_lines == 4 + 3  # written + added
 
-    def test_net_lines(self, codegen_fixture):
-        stats = analyze_codegen(codegen_fixture)
-        assert stats.net_lines == 4 + 3 - 2  # written + added - removed
+class TestIsDuringSession:
+    def test_inside(self):
+        t1 = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
+        t2 = datetime(2026, 2, 10, 11, 0, tzinfo=timezone.utc)
+        commit = datetime(2026, 2, 10, 10, 30, tzinfo=timezone.utc)
+        assert _is_during_session(commit, [(t1, t2)]) is True
 
-    def test_files_touched(self, codegen_fixture):
-        stats = analyze_codegen(codegen_fixture)
-        assert "/test/app.py" in stats.files_touched
-        assert "/test/README.md" not in stats.files_touched
+    def test_outside(self):
+        t1 = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
+        t2 = datetime(2026, 2, 10, 11, 0, tzinfo=timezone.utc)
+        commit = datetime(2026, 2, 10, 12, 0, tzinfo=timezone.utc)
+        assert _is_during_session(commit, [(t1, t2)]) is False
+
+    def test_boundary(self):
+        t1 = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
+        t2 = datetime(2026, 2, 10, 11, 0, tzinfo=timezone.utc)
+        assert _is_during_session(t1, [(t1, t2)]) is True
+        assert _is_during_session(t2, [(t1, t2)]) is True
+
+
+class TestCountCodebaseLines:
+    def test_counts_python_files(self, tmp_path):
+        (tmp_path / "app.py").write_text("def main():\n    pass\n")
+        (tmp_path / "test.py").write_text("assert True\n")
+        assert count_codebase_lines(tmp_path) == 3
+
+    def test_skips_node_modules(self, tmp_path):
+        nm = tmp_path / "node_modules" / "pkg"
+        nm.mkdir(parents=True)
+        (nm / "index.js").write_text("module.exports = {}\n")
+        (tmp_path / "app.js").write_text("console.log('hi')\n")
+        assert count_codebase_lines(tmp_path) == 1
+
+    def test_nonexistent_dir(self, tmp_path):
+        assert count_codebase_lines(tmp_path / "nope") == 0
+
+
+class TestAnalyzeRepo:
+    def test_with_git_repo(self, tmp_path):
+        """Create a real git repo, make commits, and verify analysis."""
+        # Init repo
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=tmp_path, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=tmp_path, capture_output=True,
+        )
+
+        # Write a file and commit
+        (tmp_path / "app.py").write_text("def hello():\n    print('hi')\n")
+        subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "initial"],
+            cwd=tmp_path, capture_output=True,
+        )
+
+        # Get the commit time
+        result = subprocess.run(
+            ["git", "log", "--format=%aI", "-1"],
+            cwd=tmp_path, capture_output=True, text=True,
+        )
+        commit_time = datetime.fromisoformat(result.stdout.strip())
+
+        # Create a session window that covers the commit
+        window_start = commit_time - timedelta(minutes=5)
+        window_end = commit_time + timedelta(minutes=5)
+
+        stats = _analyze_repo(tmp_path, [(window_start, window_end)])
+        assert stats.ai_lines == 2  # 2 lines added
+        assert stats.ai_commits == 1
+        assert stats.total_commits == 1
+        assert stats.total_lines == 2
+
+    def test_commit_outside_session(self, tmp_path):
+        """Commits outside session windows should not count as AI."""
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=tmp_path, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=tmp_path, capture_output=True,
+        )
+
+        (tmp_path / "app.py").write_text("print('hello')\n")
+        subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "manual commit"],
+            cwd=tmp_path, capture_output=True,
+        )
+
+        # Session window far in the future — should not match
+        far_future = datetime(2099, 1, 1, tzinfo=timezone.utc)
+        stats = _analyze_repo(tmp_path, [(far_future, far_future + timedelta(hours=1))])
+        assert stats.ai_lines == 0
+        assert stats.ai_commits == 0
+        assert stats.total_commits == 1
+        assert stats.total_lines == 1

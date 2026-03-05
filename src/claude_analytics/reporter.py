@@ -73,40 +73,47 @@ def format_codegen_section(
     lines.append(f"  {_c(BOLD, 'AI Code Generation')}")
     lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
 
-    lines.append(f"  {_c(DIM, 'Files created')}       {_c(BOLD, str(stats.files_created)):>8}")
-    lines.append(f"  {_c(DIM, 'Files edited')}        {_c(BOLD, str(stats.files_edited)):>8}")
-    lines.append(f"  {_c(DIM, 'Files touched')}       {_c(BOLD, str(len(stats.files_touched))):>8}")
+    # Overall AI percentage
+    if stats.total_lines > 0:
+        pct = stats.ai_percentage
+        bar = _bar(pct / 100, "coding", BAR_WIDTH)
+        lines.append(f"  {_c(BOLD, 'AI-generated')}  {bar}  {_c(BOLD + ACCENT_COLOR, f'{pct:.0f}%')}")
+        lines.append(f"  {_c(DIM, f'  {stats.ai_lines:,} AI lines / {stats.total_lines:,} total lines')}")
+    else:
+        lines.append(f"  {_c(BOLD, 'AI lines')}        {_c(BOLD + ACCENT_COLOR, f'{stats.ai_lines:>8,}')}")
+
     lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
-    lines.append(f"  {_c(DIM, 'Lines written')}  {_c(GREEN, '(new)')}{_c(BOLD, f'{stats.total_lines_written:>8,}')}")
-    lines.append(f"  {_c(DIM, 'Lines added')}    {_c(GREEN, '(edit)')}{_c(BOLD, f'{stats.total_lines_added:>7,}')}")
-    lines.append(f"  {_c(DIM, 'Lines removed')}  {_c(CATEGORY_COLORS['debug'], '(edit)')}{_c(BOLD, f'{stats.total_lines_removed:>7,}')}")
-    lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
-    lines.append(f"  {_c(BOLD, 'Total AI lines')}      {_c(BOLD + ACCENT_COLOR, f'{stats.total_ai_lines:>8,}')}")
-    lines.append(f"  {_c(BOLD, 'Net lines')}           {_c(BOLD + GREEN, f'{stats.net_lines:>8,}')}")
+    lines.append(f"  {_c(DIM, 'AI commits')}          {_c(BOLD, str(stats.ai_commits))}")
+    lines.append(f"  {_c(DIM, 'Total commits')}       {_c(BOLD, str(stats.total_commits))}")
+    lines.append(f"  {_c(DIM, 'Files touched')}       {_c(BOLD, str(len(stats.files_touched)))}")
     lines.append("")
 
-    # Per-project breakdown
+    # Per-project breakdown with percentages
     if project_stats:
-        lines.append(f"  {_c(BOLD, 'AI Lines by Project')}")
+        lines.append(f"  {_c(BOLD, 'AI % by Project')}")
         lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
 
         sorted_projects = sorted(
             project_stats.items(),
-            key=lambda x: x[1].total_ai_lines,
+            key=lambda x: x[1].ai_lines,
             reverse=True,
         )
         for proj_name, pstats in sorted_projects[:10]:
-            if pstats.total_ai_lines == 0:
+            if pstats.ai_lines <= 0:
                 continue
-            total = f"{pstats.total_ai_lines:,}"
-            net = f"+{pstats.net_lines:,}" if pstats.net_lines >= 0 else f"{pstats.net_lines:,}"
-            files = len(pstats.files_touched)
-            lines.append(
-                f"  {_c(HEADER_COLOR, f'{proj_name:<20}')} "
-                f"{_c(BOLD, f'{total:>7}')} lines  "
-                f"{_c(GREEN, f'{net:>7}')} net  "
-                f"{_c(DIM, f'{files} files')}"
-            )
+            if pstats.total_lines > 0:
+                pct = pstats.ai_percentage
+                mini_bar = _bar(pct / 100, "coding", 10)
+                pct_str = _c(BOLD + ACCENT_COLOR, f"{pct:>3.0f}%")
+                lines.append(
+                    f"  {_c(HEADER_COLOR, f'{proj_name:<18}')} {mini_bar} {pct_str}"
+                    f"  {_c(DIM, f'{pstats.ai_lines:,}/{pstats.total_lines:,}')}"
+                )
+            else:
+                lines.append(
+                    f"  {_c(HEADER_COLOR, f'{proj_name:<18}')} "
+                    f"{_c(BOLD, f'{pstats.ai_lines:>6,}')} lines"
+                )
         lines.append("")
 
     return "\n".join(lines)
@@ -215,7 +222,7 @@ def print_report(
         lines.append("")
 
     # AI Code Generation section
-    if codegen_stats and codegen_stats.total_ai_lines > 0:
+    if codegen_stats and codegen_stats.ai_lines > 0:
         lines.append(format_codegen_section(codegen_stats, codegen_by_project))
 
     return "\n".join(lines)
