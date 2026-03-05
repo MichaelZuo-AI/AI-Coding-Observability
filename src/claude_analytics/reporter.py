@@ -6,7 +6,7 @@ from datetime import datetime
 from .models import ActivityBlock
 from .codegen import CodeGenStats
 
-CATEGORY_ORDER = ["coding", "debug", "design", "devops", "review", "other"]
+CATEGORY_ORDER = ["coding", "debug", "design", "devops", "review", "data", "chat", "other"]
 BAR_WIDTH = 20
 
 # ANSI color codes
@@ -21,6 +21,8 @@ CATEGORY_COLORS = {
     "design": "\033[38;5;141m",  # purple
     "devops": "\033[38;5;208m",  # orange
     "review": "\033[38;5;81m",   # cyan
+    "data": "\033[38;5;219m",    # pink
+    "chat": "\033[38;5;252m",    # light gray
     "other": "\033[38;5;245m",   # gray
 }
 

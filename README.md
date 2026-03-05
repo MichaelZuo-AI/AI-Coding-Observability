@@ -11,23 +11,24 @@ A local-first CLI tool that parses Claude Code session logs to analyze how engin
 
   Active Time Breakdown
   ──────────────────────────────────────────────
-  coding     █████████░░░░░░░░░░░   42%    68h
-  debug      ████░░░░░░░░░░░░░░░░   21%    34h
-  design     ███░░░░░░░░░░░░░░░░░   16%    26h
-  devops     ██░░░░░░░░░░░░░░░░░░   11%    18h
-  review     █░░░░░░░░░░░░░░░░░░░    8%    13h
-  other      ░░░░░░░░░░░░░░░░░░░░    2%     3h
+  coding     █░░░░░░░░░░░░░░░░░░░   10%     4h
+  debug      ░░░░░░░░░░░░░░░░░░░░    1%    32m
+  design     ░░░░░░░░░░░░░░░░░░░░    3%     1h
+  devops     ███░░░░░░░░░░░░░░░░░   16%     6h
+  review     ░░░░░░░░░░░░░░░░░░░░    3%     1h
+  data       ████░░░░░░░░░░░░░░░░   24%     9h
+  chat       ████████░░░░░░░░░░░░   43%    17h
   ──────────────────────────────────────────────
-  Total Active                       100%   162h
+  Total Active                       100%    39h
 
   AI Code Generation
   ──────────────────────────────────────────────
-  Lines written  (new)  69,799
-  Lines added    (edit) 15,554
-  Lines removed  (edit) 11,574
+  AI-generated  ████████████░░░░░░░░  61%
+    58,983 AI lines / 96,867 total lines
   ──────────────────────────────────────────────
-  Total AI lines        85,353
-  Net lines             73,779
+  AI commits          229
+  Total commits       241
+  Files touched       3257
 ```
 
 ## How It Works
@@ -35,7 +36,7 @@ A local-first CLI tool that parses Claude Code session logs to analyze how engin
 1. **Parses** `~/.claude/projects/**/*.jsonl` session logs (read-only, never modified)
 2. **Classifies** each interaction by intent using regex patterns + tool-use signals
 3. **Calculates** active time with idle gap detection (10-min threshold)
-4. **Measures** AI code generation from Write/Edit tool calls
+4. **Measures** AI code generation by matching git commits to session time windows
 5. **Reports** per-category and per-project breakdowns with colored terminal output
 
 ## Install
@@ -44,16 +45,18 @@ Requires **Python 3.11+**.
 
 ```bash
 # One-liner with pipx (recommended)
-pipx install git+https://github.com/MichaelZuo-AI/AI-Coding-Observability.git
+pipx install "git+https://github.com/MichaelZuo-AI/AI-Coding-Observability.git"
 
 # Or with pip
-pip install git+https://github.com/MichaelZuo-AI/AI-Coding-Observability.git
+pip install "git+https://github.com/MichaelZuo-AI/AI-Coding-Observability.git"
 
 # Or clone and run directly (no install needed)
 git clone https://github.com/MichaelZuo-AI/AI-Coding-Observability.git
 cd AI-Coding-Observability
 python -m claude_analytics report
 ```
+
+To upgrade: `pipx upgrade claude-analytics`
 
 ## Usage
 
@@ -76,12 +79,13 @@ claude-analytics sessions --limit 10
 
 | Category | Signal |
 |----------|--------|
-| **coding** | implement, create, refactor + heavy Edit/Write tool use |
-| **debug** | fix, error, crash, TypeError + heavy Bash/Grep tool use |
-| **design** | architecture, plan, "how should" + heavy Read tool use |
-| **devops** | deploy, docker, CI/CD, pipeline |
-| **review** | explain, review, "walk me through" |
-| **other** | general conversation, etc. |
+| **coding** | implement, create, refactor, UI components + Edit/Write tool use |
+| **debug** | fix, error, crash, "still not work" + Bash/Grep tool use |
+| **design** | architecture, plan, "how should", tradeoffs |
+| **devops** | deploy, commit, push, install, setup, CI/CD |
+| **review** | explain, "show me", "how to use", "walk me through" |
+| **data** | stock analysis, portfolio, financial, images, email |
+| **chat** | short replies (yes/ok/go ahead), greetings, slash commands |
 
 ## Privacy
 
@@ -93,12 +97,31 @@ claude-analytics sessions --limit 10
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/ -v   # 45 tests
+pytest tests/ -v   # 63 tests
 ```
+
+## Changelog
+
+### v0.3.0
+- Improved classifier: replaced 75% "other" with specific **data** and **chat** categories
+- Added patterns for financial terms, image shares, short replies, slash commands
+- Better coding/devops/review detection (commit, push, install, "show me", "how to use")
+- 63 tests
+
+### v0.2.0
+- Git-based AI code generation tracking (replaces Write/Edit counting)
+- Matches git commit timestamps to Claude Code session time windows
+- Captures all AI code including Bash scaffolding (npx create-next-app, etc.)
+- Shows AI% per project with progress bars
+
+### v0.1.0
+- Initial release: JSONL parser, rule-based classifier, time aggregator
+- Colored CLI report with per-category and per-project breakdowns
+- Write/Edit tool-based AI line counting
 
 ## Roadmap
 
 - [x] **Phase 1** — Parser + rule-based classifier + colored CLI report
-- [x] **Phase 1.5** — AI code generation metrics (lines written/edited by AI)
+- [x] **Phase 1.5** — AI code generation metrics (git-based, per-project AI%)
 - [ ] **Phase 2** — Claude Haiku API fallback for low-confidence classification + SQLite cache
 - [ ] **Phase 3** — React + Recharts dashboard
