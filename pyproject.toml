@@ -1,13 +1,34 @@
 [build-system]
-requires = ["setuptools>=68.0", "setuptools-scm"]
+requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-analytics"
-version = "0.3.0"
+version = "0.3.1"
 description = "Analyze Claude Code session logs to understand development lifecycle patterns"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = []
+authors = [
+    {name = "Michael Zuo", email = "michaelzuo.ai@gmail.com"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+]
+keywords = ["claude", "ai", "analytics", "developer-tools", "cli"]
+
+[project.urls]
+Homepage = "https://github.com/MichaelZuo-AI/AI-Coding-Observability"
+Repository = "https://github.com/MichaelZuo-AI/AI-Coding-Observability"
+Issues = "https://github.com/MichaelZuo-AI/AI-Coding-Observability/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]

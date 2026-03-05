@@ -41,22 +41,26 @@ A local-first CLI tool that parses Claude Code session logs to analyze how engin
 
 ## Install
 
-Requires **Python 3.11+**.
-
 ```bash
-# One-liner with pipx (recommended)
-pipx install "git+https://github.com/MichaelZuo-AI/AI-Coding-Observability.git"
+# PyPI (recommended)
+pip install claude-analytics
 
-# Or with pip
-pip install "git+https://github.com/MichaelZuo-AI/AI-Coding-Observability.git"
+# Or with uv (fast, auto-fetches Python)
+uv tool install claude-analytics
 
-# Or clone and run directly (no install needed)
+# Or run without installing
+uvx claude-analytics report
+
+# Or with pipx
+pipx install claude-analytics
+
+# Or from source
 git clone https://github.com/MichaelZuo-AI/AI-Coding-Observability.git
 cd AI-Coding-Observability
 python -m claude_analytics report
 ```
 
-To upgrade: `pipx upgrade claude-analytics`
+To upgrade: `pip install -U claude-analytics` / `uv tool upgrade claude-analytics` / `pipx upgrade claude-analytics`
 
 ## Usage
 
@@ -101,6 +105,10 @@ pytest tests/ -v   # 63 tests
 ```
 
 ## Changelog
+
+### v0.3.1
+- Fixed ZeroDivisionError when a project has zero active time (#1)
+- Added progress indicators for large `~/.claude` directories (#1)
 
 ### v0.3.0
 - Improved classifier: replaced 75% "other" with specific **data** and **chat** categories

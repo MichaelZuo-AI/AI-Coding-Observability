@@ -211,6 +211,8 @@ def print_report(
 
         for proj_name, cats in sorted_projects[:10]:
             proj_total = sum(cats.values())
+            if proj_total == 0:
+                continue
             dur = format_duration(proj_total)
             # Top 2 categories for this project
             top_cats = sorted(cats.items(), key=lambda x: x[1], reverse=True)[:2]

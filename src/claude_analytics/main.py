@@ -11,6 +11,15 @@ from .codegen import analyze_codegen, analyze_codegen_by_project
 from .reporter import print_report
 
 
+def _progress(msg: str) -> None:
+    """Print a progress message to stderr (won't interfere with piped output)."""
+    print(f"\r  {msg}...", end="", file=sys.stderr, flush=True)
+
+
+def _progress_done() -> None:
+    print("\r" + " " * 40 + "\r", end="", file=sys.stderr, flush=True)
+
+
 def parse_date(s: str) -> datetime:
     """Parse a date string like '2026-02-01' into a timezone-aware datetime."""
     dt = datetime.strptime(s, "%Y-%m-%d")
@@ -19,9 +28,12 @@ def parse_date(s: str) -> datetime:
 
 def cmd_report(args: argparse.Namespace) -> None:
     projects_dir = Path(args.projects_dir) if args.projects_dir else CLAUDE_PROJECTS_DIR
+
+    _progress("Parsing sessions")
     sessions = parse_all_sessions(projects_dir, project_filter=args.project)
 
     if not sessions:
+        _progress_done()
         print("No sessions found.")
         return
 
@@ -35,24 +47,31 @@ def cmd_report(args: argparse.Namespace) -> None:
         sessions = [s for s in sessions if s.start_time and s.start_time <= to_date]
 
     if not sessions:
+        _progress_done()
         print("No sessions found for the specified date range.")
         return
 
+    _progress(f"Classifying {len(sessions)} sessions")
     all_blocks = []
     for session in sessions:
         blocks = build_activity_blocks(session)
         all_blocks.extend(blocks)
 
+    _progress("Analyzing git repos")
     codegen_stats = analyze_codegen(projects_dir, project_filter=args.project)
     codegen_by_project = analyze_codegen_by_project(projects_dir) if not args.project else None
 
+    _progress_done()
     report = print_report(all_blocks, from_date, to_date, codegen_stats, codegen_by_project)
     print(report)
 
 
 def cmd_sessions(args: argparse.Namespace) -> None:
     projects_dir = Path(args.projects_dir) if args.projects_dir else CLAUDE_PROJECTS_DIR
+
+    _progress("Parsing sessions")
     sessions = parse_all_sessions(projects_dir, project_filter=args.project)
+    _progress_done()
 
     if not sessions:
         print("No sessions found.")
