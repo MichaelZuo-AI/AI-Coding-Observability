@@ -42,17 +42,11 @@ A local-first CLI tool that parses Claude Code session logs to analyze how engin
 ## Install
 
 ```bash
-# PyPI (recommended)
-pip install claude-analytics
+# One-liner with pipx (recommended)
+pipx install "git+https://github.com/MichaelZuo-AI/AI-Coding-Observability.git"
 
-# Or with uv (fast, auto-fetches Python)
-uv tool install claude-analytics
-
-# Or run without installing
-uvx claude-analytics report
-
-# Or with pipx
-pipx install claude-analytics
+# Or with pip
+pip install "git+https://github.com/MichaelZuo-AI/AI-Coding-Observability.git"
 
 # Or from source
 git clone https://github.com/MichaelZuo-AI/AI-Coding-Observability.git
@@ -60,7 +54,7 @@ cd AI-Coding-Observability
 python -m claude_analytics report
 ```
 
-To upgrade: `pip install -U claude-analytics` / `uv tool upgrade claude-analytics` / `pipx upgrade claude-analytics`
+To upgrade: `pipx install --force "git+https://github.com/MichaelZuo-AI/AI-Coding-Observability.git"`
 
 ## Usage
 
