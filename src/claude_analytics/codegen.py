@@ -1,6 +1,8 @@
 """Measure AI-generated code by matching git commits to Claude Code sessions."""
 
+import bisect
 import json
+import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
@@ -35,7 +37,6 @@ SKIP_PATTERNS = [
     "/.claude/",
     "/node_modules/",
     "/tmp/",
-    ".md",
 ]
 
 # Buffer time around sessions — commits may happen slightly after session ends
@@ -48,7 +49,7 @@ class CodeGenStats:
     total_lines: int = 0       # total lines in codebase on disk
     ai_commits: int = 0        # number of commits during AI sessions
     total_commits: int = 0     # total commits in repo
-    files_touched: set = field(default_factory=set)
+    files_touched: set[str] = field(default_factory=set)
 
     @property
     def ai_percentage(self) -> float:
@@ -76,15 +77,15 @@ def count_codebase_lines(project_dir: Path) -> int:
         return 0
 
     total = 0
-    for root, dirs, files in project_dir.walk():
+    for root, dirs, files in os.walk(project_dir):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
         for fname in files:
-            fpath = root / fname
-            if not _is_code_file(str(fpath)):
+            fpath = os.path.join(root, fname)
+            if not _is_code_file(fpath):
                 continue
             try:
-                text = fpath.read_text(errors="ignore")
-                total += sum(1 for line in text.split("\n") if line.strip())
+                with open(fpath, errors="ignore") as f:
+                    total += sum(1 for line in f if line.strip())
             except (OSError, UnicodeDecodeError):
                 continue
     return total
@@ -130,10 +131,17 @@ def _merge_windows(windows: list[tuple[datetime, datetime]]) -> list[tuple[datet
 def _is_during_session(
     commit_time: datetime, windows: list[tuple[datetime, datetime]]
 ) -> bool:
-    """Check if a commit timestamp falls within any session window."""
-    for start, end in windows:
-        if start <= commit_time <= end:
-            return True
+    """Check if a commit timestamp falls within any merged session window.
+
+    Uses binary search for O(log n) lookup. Assumes windows are sorted and non-overlapping
+    (i.e. output of _merge_windows).
+    """
+    if not windows:
+        return False
+    starts = [w[0] for w in windows]
+    idx = bisect.bisect_right(starts, commit_time) - 1
+    if idx >= 0 and commit_time <= windows[idx][1]:
+        return True
     return False
 
 

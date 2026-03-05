@@ -27,16 +27,31 @@ class TestExtractProjectName:
     def test_simple_name_no_leading_dash(self):
         assert _extract_project_name("test-project") == "test-project"
 
-    def test_claude_style_path_extracts_last_segment(self):
-        # "-Users-michael-Engineering-MyProject" → "MyProject"
-        assert _extract_project_name("-Users-michael-Engineering-MyProject") == "MyProject"
+    def test_claude_style_path_extracts_project(self):
+        # Uses real filesystem: /Users exists, /Users/{user} exists,
+        # but the project dir after that won't exist as individual segments
+        # Fallback to last segment for fully-resolved or non-existent paths
+        result = _extract_project_name("-nonexistent-path-MyProject")
+        assert result == "MyProject"
+
+    def test_claude_style_path_preserves_hyphens(self):
+        # Real-world test: actual Claude Code dir name from this machine
+        import os
+        home = os.path.expanduser("~")
+        # Build a dir name that resolves through real parent dirs
+        # e.g. -Users-michaelzuo-Engineering-FakeProject-With-Hyphens
+        parts = home.split("/")  # ['', 'Users', 'michaelzuo']
+        dir_name = "-" + "-".join(parts[1:]) + "-FakeProject-With-Hyphens"
+        result = _extract_project_name(dir_name)
+        assert result == "FakeProject-With-Hyphens"
 
     def test_claude_style_path_short(self):
-        # "-Users-michael-Work" → "Work"
-        assert _extract_project_name("-Users-michael-Work") == "Work"
+        # When no filesystem segments match, falls back to last part
+        result = _extract_project_name("-zzz-nonexistent-Work")
+        assert result == "Work"
 
     def test_single_dash_prefix(self):
-        # "-SomeProject" → after stripping dash: "SomeProject", split on "-" → ["SomeProject"]
+        # "-SomeProject" → "SomeProject" (/ is not a dir match for "SomeProject")
         assert _extract_project_name("-SomeProject") == "SomeProject"
 
     def test_empty_string(self):

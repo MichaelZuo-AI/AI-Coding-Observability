@@ -34,11 +34,36 @@ def _extract_project_name(project_dir_name: str) -> str:
     """Convert directory name like '-Users-michael-Engineering-MyProject' to 'MyProject'.
 
     For simple names like 'test-project', return as-is.
-    For Claude Code style paths like '-Users-michael-Eng-MyProject', return last segment.
+    For Claude Code style paths starting with '-', the name encodes a filesystem
+    path with '/' replaced by '-'. We resolve against the real filesystem to find
+    where parent directories end and the project name begins, preserving hyphens
+    in project names like 'AI-Coding-Observability'.
     """
     if not project_dir_name.startswith("-"):
         return project_dir_name
     parts = project_dir_name.strip("-").split("-")
+    if not parts:
+        return project_dir_name
+
+    # Walk the filesystem greedily to find how deep the parent path goes.
+    # e.g. for ["Users","michaelzuo","Engineering","AIDreamWorks","AI","Coding","Observability"]
+    # /Users/michaelzuo/Engineering/AIDreamWorks exists but .../AI doesn't,
+    # so remaining "AI-Coding-Observability" is the project name.
+    current = Path("/")
+    last_valid_depth = 0
+    for i, part in enumerate(parts):
+        candidate = current / part
+        if candidate.is_dir():
+            current = candidate
+            last_valid_depth = i + 1
+        else:
+            break
+
+    if last_valid_depth > 0 and last_valid_depth < len(parts):
+        return "-".join(parts[last_valid_depth:])
+
+    # Fallback: if the entire path resolved (project dir exists) or nothing
+    # resolved (deleted/moved), return the last segment
     return parts[-1] if parts else project_dir_name
 
 
