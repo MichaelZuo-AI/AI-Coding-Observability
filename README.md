@@ -19,6 +19,15 @@ A local-first CLI tool that parses Claude Code session logs to analyze how engin
   other      ░░░░░░░░░░░░░░░░░░░░    2%     3h
   ──────────────────────────────────────────────
   Total Active                       100%   162h
+
+  AI Code Generation
+  ──────────────────────────────────────────────
+  Lines written  (new)  69,799
+  Lines added    (edit) 15,554
+  Lines removed  (edit) 11,574
+  ──────────────────────────────────────────────
+  Total AI lines        85,353
+  Net lines             73,779
 ```
 
 ## How It Works
@@ -26,23 +35,30 @@ A local-first CLI tool that parses Claude Code session logs to analyze how engin
 1. **Parses** `~/.claude/projects/**/*.jsonl` session logs (read-only, never modified)
 2. **Classifies** each interaction by intent using regex patterns + tool-use signals
 3. **Calculates** active time with idle gap detection (10-min threshold)
-4. **Reports** per-category and per-project breakdowns with colored terminal output
+4. **Measures** AI code generation from Write/Edit tool calls
+5. **Reports** per-category and per-project breakdowns with colored terminal output
 
 ## Install
 
+Requires **Python 3.11+**.
+
 ```bash
-# Requires Python 3.11+
+# One-liner with pipx (recommended)
+pipx install git+https://github.com/MichaelZuo-AI/AI-Coding-Observability.git
+
+# Or with pip
+pip install git+https://github.com/MichaelZuo-AI/AI-Coding-Observability.git
+
+# Or clone and run directly (no install needed)
 git clone https://github.com/MichaelZuo-AI/AI-Coding-Observability.git
 cd AI-Coding-Observability
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+python -m claude_analytics report
 ```
 
 ## Usage
 
 ```bash
-# Activity report (all time)
+# Full activity report
 claude-analytics report
 
 # Filter by date range
@@ -65,22 +81,24 @@ claude-analytics sessions --limit 10
 | **design** | architecture, plan, "how should" + heavy Read tool use |
 | **devops** | deploy, docker, CI/CD, pipeline |
 | **review** | explain, review, "walk me through" |
-| **other** | general conversation, portfolio mgmt, etc. |
+| **other** | general conversation, etc. |
 
 ## Privacy
 
 - All processing is **100% local** — no data leaves your machine
 - Session logs are read-only, never modified
-- No API keys required (Phase 1 is fully offline)
+- No API keys required — fully offline
 
 ## Testing
 
 ```bash
-pytest tests/ -v   # 30 tests
+pip install -e ".[dev]"
+pytest tests/ -v   # 45 tests
 ```
 
 ## Roadmap
 
 - [x] **Phase 1** — Parser + rule-based classifier + colored CLI report
+- [x] **Phase 1.5** — AI code generation metrics (lines written/edited by AI)
 - [ ] **Phase 2** — Claude Haiku API fallback for low-confidence classification + SQLite cache
 - [ ] **Phase 3** — React + Recharts dashboard
