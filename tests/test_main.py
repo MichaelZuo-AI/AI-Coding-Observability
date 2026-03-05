@@ -188,7 +188,7 @@ class TestCmdReport:
         args = _make_args(projects_dir="/tmp/my-claude-projects")
         captured_dirs = []
 
-        def mock_parse(projects_dir, project_filter=None):
+        def mock_parse(projects_dir, project_filter=None, **kwargs):
             captured_dirs.append(projects_dir)
             return []
 
@@ -207,7 +207,7 @@ class TestCmdReport:
         args = _make_args(projects_dir=None)
         captured_dirs = []
 
-        def mock_parse(projects_dir, project_filter=None):
+        def mock_parse(projects_dir, project_filter=None, **kwargs):
             captured_dirs.append(projects_dir)
             return []
 
@@ -224,7 +224,7 @@ class TestCmdReport:
         args = _make_args(project="my-specific-project")
         captured_filters = []
 
-        def mock_parse(projects_dir, project_filter=None):
+        def mock_parse(projects_dir, project_filter=None, **kwargs):
             captured_filters.append(project_filter)
             return []
 
@@ -396,7 +396,7 @@ class TestCmdSessions:
         args = _make_args(projects_dir="/custom/path")
         captured_dirs = []
 
-        def mock_parse(projects_dir, project_filter=None):
+        def mock_parse(projects_dir, project_filter=None, **kwargs):
             captured_dirs.append(projects_dir)
             return []
 
@@ -413,7 +413,7 @@ class TestCmdSessions:
         args = _make_args(project="filter-me")
         captured_filters = []
 
-        def mock_parse(projects_dir, project_filter=None):
+        def mock_parse(projects_dir, project_filter=None, **kw):
             captured_filters.append(project_filter)
             return []
 

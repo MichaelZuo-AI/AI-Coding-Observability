@@ -1,6 +1,9 @@
 """Parse Claude Code JSONL session logs into structured Session objects."""
 
+from __future__ import annotations
+
 import json
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -212,16 +215,25 @@ def _deduplicate_messages(messages: list[Message]) -> list[Message]:
 def parse_all_sessions(
     projects_dir: Path = CLAUDE_PROJECTS_DIR,
     project_filter: str | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> list[Session]:
-    """Parse all session files in parallel and return valid sessions."""
+    """Parse all session files in parallel and return valid sessions.
+
+    on_progress: optional callback(done, total) called as each file completes.
+    """
     paths = discover_sessions(projects_dir, project_filter)
     if not paths:
         return []
 
+    total = len(paths)
     sessions = []
+    done = 0
     with ThreadPoolExecutor() as executor:
         futures = {executor.submit(parse_session, path): path for path in paths}
         for future in as_completed(futures):
+            done += 1
+            if on_progress:
+                on_progress(done, total)
             session = future.result()
             if session is not None:
                 sessions.append(session)

@@ -11,13 +11,24 @@ from .codegen import analyze_codegen, analyze_codegen_by_project
 from .reporter import print_report
 
 
-def _progress(msg: str) -> None:
-    """Print a progress message to stderr (won't interfere with piped output)."""
-    print(f"\r  {msg}...", end="", file=sys.stderr, flush=True)
+_BAR_WIDTH = 20
+_CLEAR_LINE = "\r" + " " * 60 + "\r"
+
+
+def _progress(msg: str, done: int = 0, total: int = 0) -> None:
+    """Print a progress bar to stderr (won't interfere with piped output)."""
+    if total > 0:
+        frac = done / total
+        filled = int(frac * _BAR_WIDTH)
+        bar = "\u2588" * filled + "\u2591" * (_BAR_WIDTH - filled)
+        pct = f"{frac * 100:3.0f}%"
+        print(f"\r  {msg} [{bar}] {pct} ({done}/{total})", end="", file=sys.stderr, flush=True)
+    else:
+        print(f"\r  {msg}...", end="", file=sys.stderr, flush=True)
 
 
 def _progress_done() -> None:
-    print("\r" + " " * 40 + "\r", end="", file=sys.stderr, flush=True)
+    print(_CLEAR_LINE, end="", file=sys.stderr, flush=True)
 
 
 def parse_date(s: str) -> datetime:
@@ -29,8 +40,12 @@ def parse_date(s: str) -> datetime:
 def cmd_report(args: argparse.Namespace) -> None:
     projects_dir = Path(args.projects_dir) if args.projects_dir else CLAUDE_PROJECTS_DIR
 
-    _progress("Parsing sessions")
-    sessions = parse_all_sessions(projects_dir, project_filter=args.project)
+    _progress("Discovering sessions")
+    sessions = parse_all_sessions(
+        projects_dir,
+        project_filter=args.project,
+        on_progress=lambda done, total: _progress("Parsing sessions", done, total),
+    )
 
     if not sessions:
         _progress_done()
@@ -57,8 +72,12 @@ def cmd_report(args: argparse.Namespace) -> None:
         blocks = build_activity_blocks(session)
         all_blocks.extend(blocks)
 
-    _progress("Analyzing git repos")
-    codegen_stats = analyze_codegen(projects_dir, project_filter=args.project, sessions=sessions)
+    codegen_stats = analyze_codegen(
+        projects_dir,
+        project_filter=args.project,
+        sessions=sessions,
+        on_progress=lambda done, total: _progress("Analyzing git repos", done, total),
+    )
     codegen_by_project = analyze_codegen_by_project(projects_dir, sessions=sessions) if not args.project else None
 
     _progress_done()
@@ -69,8 +88,12 @@ def cmd_report(args: argparse.Namespace) -> None:
 def cmd_sessions(args: argparse.Namespace) -> None:
     projects_dir = Path(args.projects_dir) if args.projects_dir else CLAUDE_PROJECTS_DIR
 
-    _progress("Parsing sessions")
-    sessions = parse_all_sessions(projects_dir, project_filter=args.project)
+    _progress("Discovering sessions")
+    sessions = parse_all_sessions(
+        projects_dir,
+        project_filter=args.project,
+        on_progress=lambda done, total: _progress("Parsing sessions", done, total),
+    )
     _progress_done()
 
     if not sessions:

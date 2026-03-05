@@ -1,9 +1,12 @@
 """Measure AI-generated code by matching git commits to Claude Code sessions."""
 
+from __future__ import annotations
+
 import bisect
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -208,10 +211,12 @@ def analyze_codegen(
     projects_dir: Path = CLAUDE_PROJECTS_DIR,
     project_filter: str | None = None,
     sessions: list | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> CodeGenStats:
     """Analyze AI code generation across all projects using git + session matching.
 
     Accepts pre-parsed sessions to avoid redundant JSONL parsing.
+    on_progress: optional callback(done, total) called as each repo completes.
     """
     project_dirs = extract_project_dirs(projects_dir)
 
@@ -235,6 +240,8 @@ def analyze_codegen(
         repos_to_analyze.append((proj_name, git_root))
 
     stats = CodeGenStats()
+    total = len(repos_to_analyze)
+    done = 0
 
     # Analyze repos in parallel
     with ThreadPoolExecutor() as executor:
@@ -243,6 +250,9 @@ def analyze_codegen(
             for proj_name, git_root in repos_to_analyze
         }
         for future in as_completed(futures):
+            done += 1
+            if on_progress:
+                on_progress(done, total)
             proj_stats = future.result()
             stats.ai_lines += proj_stats.ai_lines
             stats.total_lines += proj_stats.total_lines
