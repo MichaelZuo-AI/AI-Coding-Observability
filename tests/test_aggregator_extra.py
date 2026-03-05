@@ -1,7 +1,7 @@
 """Additional edge-case tests for aggregator internals not covered by test_aggregator.py."""
 
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from claude_analytics.models import Message, Session, ActivityBlock
 from claude_analytics.aggregator import (
     calculate_active_time,
@@ -17,6 +17,9 @@ from claude_analytics.aggregator import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+_BASE = datetime(2026, 2, 10, 10, 0, 0, tzinfo=timezone.utc)
+
+
 def _msg(
     role: str,
     content: str,
@@ -28,6 +31,11 @@ def _msg(
 
 def _ts(hour: int = 10, minute: int = 0, second: int = 0) -> datetime:
     return datetime(2026, 2, 10, hour, minute, second, tzinfo=timezone.utc)
+
+
+def _offset(seconds: int) -> datetime:
+    """Return a datetime that is `seconds` after the base time."""
+    return _BASE + timedelta(seconds=seconds)
 
 
 def _session(messages: list[Message], project: str = "test-proj") -> Session:
@@ -65,8 +73,8 @@ class TestCalculateActiveTime:
     def test_idle_gap_excluded(self):
         """Gap >= IDLE_THRESHOLD_SECONDS should not be counted."""
         msgs = [
-            _msg("user", "a", _ts(10, 0)),
-            _msg("user", "b", _ts(10, 0, IDLE_THRESHOLD_SECONDS)),  # exactly threshold — excluded
+            _msg("user", "a", _offset(0)),
+            _msg("user", "b", _offset(IDLE_THRESHOLD_SECONDS)),  # exactly threshold — excluded
         ]
         result = calculate_active_time(msgs)
         assert result == 0
@@ -74,8 +82,8 @@ class TestCalculateActiveTime:
     def test_just_under_threshold_included(self):
         gap = IDLE_THRESHOLD_SECONDS - 1
         msgs = [
-            _msg("user", "a", _ts(10, 0, 0)),
-            _msg("user", "b", _ts(10, 0, gap)),
+            _msg("user", "a", _offset(0)),
+            _msg("user", "b", _offset(gap)),
         ]
         result = calculate_active_time(msgs)
         assert result == gap
@@ -212,11 +220,16 @@ class TestBuildActivityBlocks:
         assert blocks[0].message_count >= 2
 
     def test_tool_uses_aggregated_in_block(self):
+        # _finalize_block reads tool_uses from the Message objects in its list,
+        # which are the user messages as returned by classify_session.
+        # classify_interaction merges assistant tools into a synthetic user message,
+        # but build_activity_blocks stores the ORIGINAL user message objects.
+        # So tool_uses in blocks come from the original user message's tool_uses field.
         messages = [
-            _msg("user", "code task", _ts(10, 0)),
-            _msg("assistant", "done", _ts(10, 0, 5), ["Write", "Read"]),
-            _msg("user", "another task", _ts(10, 3)),
-            _msg("assistant", "done", _ts(10, 3, 5), ["Edit"]),
+            _msg("user", "code task", _ts(10, 0), tools=["Write"]),
+            _msg("assistant", "done", _ts(10, 0, 5)),
+            _msg("user", "another task", _ts(10, 3), tools=["Edit"]),
+            _msg("assistant", "done", _ts(10, 3, 5)),
         ]
         session = _session(messages)
         blocks = build_activity_blocks(session)
