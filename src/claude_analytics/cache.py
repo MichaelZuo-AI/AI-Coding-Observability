@@ -23,8 +23,11 @@ def _get_connection(db_path: Path = CACHE_DB) -> sqlite3.Connection:
 
 
 def _hash_content(content: str, tool_uses: list[str]) -> str:
-    key = content + "|" + ",".join(sorted(tool_uses))
-    return hashlib.sha256(key.encode()).hexdigest()[:32]
+    h = hashlib.sha256()
+    h.update(content.encode())
+    h.update(b"\x00")
+    h.update(",".join(sorted(tool_uses)).encode())
+    return h.hexdigest()[:32]
 
 
 def get_cached(content: str, tool_uses: list[str], db_path: Path = CACHE_DB) -> str | None:

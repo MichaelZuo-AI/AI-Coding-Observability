@@ -1,13 +1,22 @@
 """Tests for CLI entrypoint (main.py)."""
 
 import argparse
+import json
 import pytest
 from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 
-from claude_analytics.main import parse_date, cmd_report, cmd_sessions
+from claude_analytics.main import (
+    parse_date,
+    cmd_report,
+    cmd_sessions,
+    cmd_dashboard,
+    _collect_data,
+    _progress,
+    _progress_done,
+)
 from claude_analytics.models import Session, Message, ActivityBlock
 from claude_analytics.codegen import CodeGenStats
 
@@ -431,3 +440,309 @@ class TestCmdSessions:
         session.start_time = None  # force missing start time
         output = self._run({}, sessions=[session])
         assert "unknown" in output
+
+
+# ---------------------------------------------------------------------------
+# _progress / _progress_done — write to stderr, not stdout
+# ---------------------------------------------------------------------------
+
+class TestProgress:
+    def test_progress_writes_to_stderr_not_stdout(self, capsys):
+        _progress("Loading")
+        captured = capsys.readouterr()
+        assert "Loading" in captured.err
+        assert "Loading" not in captured.out
+
+    def test_progress_with_total_shows_percentage(self, capsys):
+        _progress("Parsing", done=5, total=10)
+        captured = capsys.readouterr()
+        assert "50%" in captured.err
+
+    def test_progress_full_completion(self, capsys):
+        _progress("Done", done=10, total=10)
+        captured = capsys.readouterr()
+        assert "100%" in captured.err
+
+    def test_progress_done_writes_to_stderr(self, capsys):
+        _progress_done()
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        # stderr should have been written (a clear-line sequence)
+        assert len(captured.err) > 0
+
+
+# ---------------------------------------------------------------------------
+# _collect_data
+# ---------------------------------------------------------------------------
+
+def _make_collect_args(**kwargs) -> argparse.Namespace:
+    defaults = {
+        "projects_dir": None,
+        "project": None,
+        "from_date": None,
+        "to_date": None,
+        "llm": False,
+    }
+    defaults.update(kwargs)
+    return argparse.Namespace(**defaults)
+
+
+def _make_block_at(
+    dt: datetime,
+    category: str = "coding",
+    duration: int = 1800,
+    project: str = "test-project",
+) -> ActivityBlock:
+    return ActivityBlock(
+        category=category,
+        start_time=dt,
+        duration_seconds=duration,
+        message_count=2,
+        project=project,
+    )
+
+
+class TestCollectData:
+    def _run(self, args_kwargs: dict, sessions, blocks_per_session=None) -> dict:
+        args = _make_collect_args(**args_kwargs)
+        call_index = [0]
+
+        def mock_build(session, **kw):
+            idx = call_index[0]
+            call_index[0] += 1
+            if blocks_per_session is not None:
+                return blocks_per_session[idx] if idx < len(blocks_per_session) else []
+            # Default: one coding block per session
+            return [_make_block_at(
+                session.start_time or datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
+            )]
+
+        with (
+            patch("claude_analytics.main.parse_all_sessions", return_value=sessions),
+            patch("claude_analytics.main.build_activity_blocks", side_effect=mock_build),
+            patch("claude_analytics.main.analyze_codegen", return_value=CodeGenStats()),
+            patch("claude_analytics.main.analyze_codegen_by_project", return_value={}),
+        ):
+            return _collect_data(args)
+
+    def test_no_sessions_returns_empty_dict(self):
+        result = self._run({}, sessions=[])
+        assert result == {}
+
+    def test_sessions_filtered_out_by_from_date_returns_empty(self):
+        old = _make_session(
+            start=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            end=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        )
+        result = self._run({"from_date": "2026-02-01"}, sessions=[old])
+        assert result == {}
+
+    def test_sessions_filtered_out_by_to_date_returns_empty(self):
+        future = _make_session(
+            start=datetime(2026, 5, 1, tzinfo=timezone.utc),
+            end=datetime(2026, 5, 2, tzinfo=timezone.utc),
+        )
+        result = self._run({"to_date": "2026-03-01"}, sessions=[future])
+        assert result == {}
+
+    def test_returns_expected_top_level_keys(self):
+        session = _make_session()
+        result = self._run({}, sessions=[session])
+        assert "dateRange" in result
+        assert "categoryTotals" in result
+        assert "projectTotals" in result
+        assert "dailySeries" in result
+        assert "codegen" in result
+        assert "codegenByProject" in result
+
+    def test_category_totals_aggregated_correctly(self):
+        session = _make_session()
+        coding_block = _make_block_at(datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc), "coding", 1800)
+        debug_block = _make_block_at(datetime(2026, 2, 10, 10, 30, tzinfo=timezone.utc), "debug", 900)
+        result = self._run({}, sessions=[session], blocks_per_session=[[coding_block, debug_block]])
+        assert result["categoryTotals"]["coding"] == 1800
+        assert result["categoryTotals"]["debug"] == 900
+
+    def test_daily_series_aggregated_by_day(self):
+        session = _make_session()
+        block1 = _make_block_at(datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc), "coding", 600)
+        block2 = _make_block_at(datetime(2026, 2, 10, 14, 0, tzinfo=timezone.utc), "coding", 400)
+        block3 = _make_block_at(datetime(2026, 2, 11, 9, 0, tzinfo=timezone.utc), "debug", 300)
+        result = self._run({}, sessions=[session], blocks_per_session=[[block1, block2, block3]])
+        daily = {d["date"]: d for d in result["dailySeries"]}
+        assert daily["2026-02-10"]["coding"] == 1000  # 600 + 400
+        assert daily["2026-02-11"]["debug"] == 300
+
+    def test_daily_series_sorted_by_date(self):
+        session = _make_session()
+        block1 = _make_block_at(datetime(2026, 2, 12, 0, 0, tzinfo=timezone.utc))
+        block2 = _make_block_at(datetime(2026, 2, 10, 0, 0, tzinfo=timezone.utc))
+        result = self._run({}, sessions=[session], blocks_per_session=[[block1, block2]])
+        dates = [d["date"] for d in result["dailySeries"]]
+        assert dates == sorted(dates)
+
+    def test_date_range_reflects_earliest_and_latest_block(self):
+        session = _make_session()
+        early = _make_block_at(datetime(2026, 2, 10, 8, 0, tzinfo=timezone.utc))
+        late = _make_block_at(datetime(2026, 2, 15, 18, 0, tzinfo=timezone.utc))
+        result = self._run({}, sessions=[session], blocks_per_session=[[early, late]])
+        assert "2026-02-10" in result["dateRange"]["from"]
+        assert "2026-02-15" in result["dateRange"]["to"]
+
+    def test_date_range_none_when_no_blocks(self):
+        session = _make_session()
+        result = self._run({}, sessions=[session], blocks_per_session=[[]])
+        # No blocks → both dates None
+        assert result["dateRange"]["from"] is None
+        assert result["dateRange"]["to"] is None
+
+    def test_codegen_section_structure(self):
+        session = _make_session()
+        result = self._run({}, sessions=[session])
+        codegen = result["codegen"]
+        assert "aiLines" in codegen
+        assert "totalLines" in codegen
+        assert "aiPercentage" in codegen
+        assert "aiCommits" in codegen
+        assert "totalCommits" in codegen
+        assert "filesTouched" in codegen
+
+    def test_codegen_by_project_excludes_zero_ai_lines(self):
+        """Projects with ai_lines == 0 should not appear in codegenByProject."""
+        session = _make_session()
+        zero_stats = CodeGenStats(ai_lines=0, total_lines=100)
+        nonzero_stats = CodeGenStats(ai_lines=50, total_lines=100)
+
+        with (
+            patch("claude_analytics.main.parse_all_sessions", return_value=[session]),
+            patch("claude_analytics.main.build_activity_blocks", return_value=[
+                _make_block_at(session.start_time)
+            ]),
+            patch("claude_analytics.main.analyze_codegen", return_value=CodeGenStats()),
+            patch("claude_analytics.main.analyze_codegen_by_project", return_value={
+                "empty-project": zero_stats,
+                "active-project": nonzero_stats,
+            }),
+        ):
+            result = _collect_data(_make_collect_args())
+
+        assert "empty-project" not in result["codegenByProject"]
+        assert "active-project" in result["codegenByProject"]
+
+    def test_project_totals_structure(self):
+        session = _make_session(project="my-proj")
+        block = _make_block_at(datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc), "coding", 600, "my-proj")
+        result = self._run({}, sessions=[session], blocks_per_session=[[block]])
+        assert "my-proj" in result["projectTotals"]
+        assert result["projectTotals"]["my-proj"]["coding"] == 600
+
+
+# ---------------------------------------------------------------------------
+# cmd_dashboard
+# ---------------------------------------------------------------------------
+
+class TestCmdDashboard:
+    def _make_dashboard_args(self, **kwargs):
+        defaults = {
+            "projects_dir": None,
+            "project": None,
+            "from_date": None,
+            "to_date": None,
+            "llm": False,
+            "port": 3333,
+        }
+        defaults.update(kwargs)
+        return argparse.Namespace(**defaults)
+
+    def test_no_data_prints_no_data_found(self):
+        args = self._make_dashboard_args()
+        captured = StringIO()
+        with (
+            patch("claude_analytics.main._collect_data", return_value={}),
+            patch("sys.stdout", captured),
+        ):
+            cmd_dashboard(args)
+        assert "No data found" in captured.getvalue()
+
+    def test_no_data_does_not_start_server(self):
+        args = self._make_dashboard_args()
+        with (
+            patch("claude_analytics.main._collect_data", return_value={}),
+            patch("http.server.HTTPServer") as mock_server,
+            patch("sys.stdout", StringIO()),
+        ):
+            cmd_dashboard(args)
+        mock_server.assert_not_called()
+
+    def _run_with_server(self, args, sample_data, port=3333):
+        """Helper: run cmd_dashboard with mocked file I/O and a server that
+        immediately raises KeyboardInterrupt. Returns captured stdout text."""
+        captured = StringIO()
+        mock_server_instance = MagicMock()
+        mock_server_instance.serve_forever.side_effect = KeyboardInterrupt
+
+        with (
+            patch("claude_analytics.main._collect_data", return_value=sample_data),
+            patch("tempfile.mkdtemp", return_value="/tmp/claude-analytics-test"),
+            patch("shutil.copy"),
+            patch("shutil.rmtree"),
+            patch("builtins.open", MagicMock()),
+            patch("claude_analytics.main.json_module") as mock_json,
+            patch("http.server.HTTPServer", return_value=mock_server_instance) as mock_httpserver,
+            patch("webbrowser.open") as mock_browser,
+            patch("sys.stdout", captured),
+        ):
+            cmd_dashboard(args)
+
+        return captured.getvalue(), mock_server_instance, mock_browser
+
+    def test_writes_data_json_via_json_dump(self):
+        """json.dump should be called with the data dict when data is available."""
+        args = self._make_dashboard_args()
+        sample_data = {"dateRange": {"from": None, "to": None}, "categoryTotals": {"coding": 100}}
+
+        mock_server_instance = MagicMock()
+        mock_server_instance.serve_forever.side_effect = KeyboardInterrupt
+
+        with (
+            patch("claude_analytics.main._collect_data", return_value=sample_data),
+            patch("tempfile.mkdtemp", return_value="/tmp/claude-analytics-test"),
+            patch("shutil.copy"),
+            patch("shutil.rmtree"),
+            patch("builtins.open", MagicMock()),
+            patch("claude_analytics.main.json_module.dump") as mock_dump,
+            patch("http.server.HTTPServer", return_value=mock_server_instance),
+            patch("webbrowser.open"),
+            patch("sys.stdout", StringIO()),
+        ):
+            cmd_dashboard(args)
+
+        mock_dump.assert_called_once()
+        # First positional arg to json.dump is the data
+        dumped_data = mock_dump.call_args[0][0]
+        assert dumped_data == sample_data
+
+    def test_prints_dashboard_data_written_message(self):
+        args = self._make_dashboard_args(port=3333)
+        sample_data = {"dateRange": {}, "categoryTotals": {}}
+        output, _, _ = self._run_with_server(args, sample_data)
+        assert "data.json" in output or "Dashboard" in output
+
+    def test_prints_dashboard_url(self):
+        """cmd_dashboard should print the URL where the dashboard is served."""
+        args = self._make_dashboard_args(port=8765)
+        sample_data = {"dateRange": {}, "categoryTotals": {}}
+        output, _, _ = self._run_with_server(args, sample_data)
+        assert "8765" in output
+
+    def test_opens_browser_on_correct_url(self):
+        args = self._make_dashboard_args(port=4444)
+        sample_data = {"dateRange": {}, "categoryTotals": {}}
+        _, _, mock_browser = self._run_with_server(args, sample_data)
+        mock_browser.assert_called_once_with("http://localhost:4444")
+
+    def test_server_closed_on_keyboard_interrupt(self):
+        args = self._make_dashboard_args(port=3333)
+        sample_data = {"dateRange": {}, "categoryTotals": {}}
+        _, mock_server_instance, _ = self._run_with_server(args, sample_data)
+        mock_server_instance.server_close.assert_called_once()

@@ -44,7 +44,8 @@ def classify_with_llm(content: str, tool_uses: list[str]) -> str | None:
 
     try:
         result = subprocess.run(
-            ["claude", "-p", prompt],
+            ["claude", "-p", "--"],
+            input=prompt,
             capture_output=True,
             text=True,
             timeout=30,
@@ -53,9 +54,13 @@ def classify_with_llm(content: str, tool_uses: list[str]) -> str | None:
             return None
 
         response = result.stdout.strip().lower()
-        # Extract the category from the response
+        # Prefer exact match
+        if response in ALL_CATEGORIES:
+            return response
+        # Fallback: first whole-word match
+        import re
         for cat in ALL_CATEGORIES:
-            if cat in response:
+            if re.search(rf'\b{cat}\b', response):
                 return cat
         return None
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):

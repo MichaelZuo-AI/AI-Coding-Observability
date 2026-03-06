@@ -22,7 +22,7 @@ class Session:
 
 @dataclass
 class ActivityBlock:
-    category: str  # "coding" | "debug" | "design" | "review" | "devops" | "other"
+    category: str  # "coding" | "debug" | "design" | "review" | "devops" | "data" | "chat" | "other"
     start_time: datetime
     duration_seconds: int
     message_count: int

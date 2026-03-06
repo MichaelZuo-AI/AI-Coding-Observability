@@ -187,24 +187,29 @@ def cmd_dashboard(args: argparse.Namespace) -> None:
         print("No data found.")
         return
 
-    dashboard_dir = Path(__file__).parent / "dashboard"
-    data_path = dashboard_dir / "data.json"
-    data_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(data_path, "w") as f:
-        json_module.dump(data, f, indent=2)
-
-    print(f"Dashboard data written to {data_path}")
-
-    # Serve the dashboard
+    import shutil
+    import tempfile
     import http.server
     import webbrowser
     import functools
 
-    port = args.port
+    # Serve from a temp directory to avoid writing into the installed package
+    serve_dir = Path(tempfile.mkdtemp(prefix="claude-analytics-"))
+    shutil.copy(Path(__file__).parent / "dashboard" / "index.html", serve_dir)
+    data_path = serve_dir / "data.json"
 
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(dashboard_dir))
-    server = http.server.HTTPServer(("localhost", port), handler)
+    with open(data_path, "w") as f:
+        json_module.dump(data, f, indent=2)
+
+    port = args.port
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(serve_dir))
+
+    try:
+        server = http.server.HTTPServer(("localhost", port), handler)
+    except OSError:
+        print(f"Port {port} is in use. Try --port <other>", file=sys.stderr)
+        sys.exit(1)
+
     url = f"http://localhost:{port}"
     print(f"Dashboard running at {url}")
     print("Press Ctrl+C to stop.")
@@ -215,6 +220,8 @@ def cmd_dashboard(args: argparse.Namespace) -> None:
     except KeyboardInterrupt:
         print("\nStopped.")
         server.server_close()
+    finally:
+        shutil.rmtree(serve_dir, ignore_errors=True)
 
 
 def cmd_sessions(args: argparse.Namespace) -> None:
