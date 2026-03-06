@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Claude Code Analytics</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/recharts@2/umd/Recharts.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+    }
+    #root { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .header { text-align: center; margin-bottom: 32px; }
+    .header h1 { font-size: 28px; color: #58a6ff; margin-bottom: 4px; }
+    .header .date-range { color: #8b949e; font-size: 14px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 20px;
+    }
+    .card h2 { font-size: 16px; color: #58a6ff; margin-bottom: 16px; }
+    .card.full { grid-column: 1 / -1; }
+    .stat-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #21262d; }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-label { color: #8b949e; }
+    .stat-value { font-weight: 600; }
+    .stat-bar { display: flex; align-items: center; gap: 8px; }
+    .bar-track { flex: 1; height: 8px; background: #21262d; border-radius: 4px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 4px; }
+    .pct { width: 40px; text-align: right; font-size: 13px; color: #e3b341; }
+    .dur { width: 50px; text-align: right; font-size: 13px; }
+    .loading { text-align: center; padding: 80px; color: #8b949e; font-size: 18px; }
+    @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
+            AreaChart, Area, ResponsiveContainer } = Recharts;
+
+    const COLORS = {
+      coding: '#56d364', debug: '#f85149', design: '#bc8cff',
+      devops: '#d29922', review: '#58a6ff', data: '#f778ba',
+      chat: '#8b949e', other: '#6e7681',
+    };
+
+    function formatDuration(seconds) {
+      if (seconds >= 3600) return Math.round(seconds / 3600) + 'h';
+      if (seconds >= 60) return Math.round(seconds / 60) + 'm';
+      return seconds + 's';
+    }
+
+    function Dashboard({ data }) {
+      const totalSeconds = Object.values(data.categoryTotals).reduce((a, b) => a + b, 0);
+      const categories = Object.entries(data.categoryTotals)
+        .sort((a, b) => b[1] - a[1]);
+
+      const pieData = categories.map(([name, value]) => ({ name, value }));
+
+      const projectEntries = Object.entries(data.projectTotals)
+        .map(([name, cats]) => ({ name, total: Object.values(cats).reduce((a, b) => a + b, 0), ...cats }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 10);
+
+      const allCats = [...new Set(categories.map(c => c[0]))];
+
+      const cg = data.codegen;
+
+      return (
+        <div>
+          <div className="header">
+            <h1>Claude Code Analytics</h1>
+            {data.dateRange.from && (
+              <div className="date-range">
+                {data.dateRange.from?.slice(0, 10)} ~ {data.dateRange.to?.slice(0, 10)}
+              </div>
+            )}
+          </div>
+
+          <div className="grid">
+            {/* Time breakdown */}
+            <div className="card">
+              <h2>Active Time Breakdown</h2>
+              {categories.map(([cat, secs]) => {
+                const pct = totalSeconds > 0 ? (secs / totalSeconds * 100) : 0;
+                return (
+                  <div key={cat} className="stat-row">
+                    <span className="stat-label" style={{width: 70, color: COLORS[cat]}}>{cat}</span>
+                    <div className="stat-bar" style={{flex: 1}}>
+                      <div className="bar-track">
+                        <div className="bar-fill" style={{width: pct + '%', background: COLORS[cat]}} />
+                      </div>
+                      <span className="pct">{Math.round(pct)}%</span>
+                      <span className="dur">{formatDuration(secs)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="stat-row" style={{marginTop: 8, fontWeight: 600}}>
+                <span>Total</span>
+                <span style={{color: '#e3b341'}}>{formatDuration(totalSeconds)}</span>
+              </div>
+            </div>
+
+            {/* Pie chart */}
+            <div className="card">
+              <h2>Time Distribution</h2>
+              <ResponsiveContainer width="100%" height={250}>
+                <PieChart>
+                  <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%"
+                    outerRadius={90} label={({name, percent}) => `${name} ${(percent*100).toFixed(0)}%`}>
+                    {pieData.map((entry) => (
+                      <Cell key={entry.name} fill={COLORS[entry.name] || '#6e7681'} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(v) => formatDuration(v)} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* AI Code Generation */}
+            <div className="card">
+              <h2>AI Code Generation</h2>
+              <div className="stat-row">
+                <span className="stat-label">AI-generated</span>
+                <span className="stat-value" style={{color: '#e3b341'}}>{cg.aiPercentage}%</span>
+              </div>
+              <div className="stat-row">
+                <div className="stat-bar" style={{width: '100%'}}>
+                  <div className="bar-track">
+                    <div className="bar-fill" style={{width: cg.aiPercentage + '%', background: '#56d364'}} />
+                  </div>
+                </div>
+              </div>
+              <div className="stat-row">
+                <span className="stat-label">AI lines / Total</span>
+                <span className="stat-value">{cg.aiLines.toLocaleString()} / {cg.totalLines.toLocaleString()}</span>
+              </div>
+              <div className="stat-row">
+                <span className="stat-label">AI commits</span>
+                <span className="stat-value">{cg.aiCommits}</span>
+              </div>
+              <div className="stat-row">
+                <span className="stat-label">Total commits</span>
+                <span className="stat-value">{cg.totalCommits}</span>
+              </div>
+              <div className="stat-row">
+                <span className="stat-label">Files touched</span>
+                <span className="stat-value">{cg.filesTouched}</span>
+              </div>
+            </div>
+
+            {/* AI % by Project */}
+            {data.codegenByProject && Object.keys(data.codegenByProject).length > 0 && (
+              <div className="card">
+                <h2>AI % by Project</h2>
+                {Object.entries(data.codegenByProject)
+                  .sort((a, b) => b[1].aiLines - a[1].aiLines)
+                  .slice(0, 8)
+                  .map(([proj, s]) => (
+                    <div key={proj} className="stat-row">
+                      <span className="stat-label" style={{width: 140, overflow: 'hidden', textOverflow: 'ellipsis'}}>{proj}</span>
+                      <div className="stat-bar" style={{flex: 1}}>
+                        <div className="bar-track">
+                          <div className="bar-fill" style={{width: s.aiPercentage + '%', background: '#56d364'}} />
+                        </div>
+                        <span className="pct">{Math.round(s.aiPercentage)}%</span>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+
+            {/* Daily activity area chart */}
+            {data.dailySeries && data.dailySeries.length > 1 && (
+              <div className="card full">
+                <h2>Daily Activity</h2>
+                <ResponsiveContainer width="100%" height={300}>
+                  <AreaChart data={data.dailySeries.map(d => {
+                    const mapped = { date: d.date };
+                    allCats.forEach(c => { mapped[c] = Math.round((d[c] || 0) / 60); });
+                    return mapped;
+                  })}>
+                    <XAxis dataKey="date" tick={{fill: '#8b949e', fontSize: 11}}
+                      tickFormatter={v => v.slice(5)} />
+                    <YAxis tick={{fill: '#8b949e', fontSize: 11}} label={{value: 'minutes', angle: -90, position: 'insideLeft', fill: '#8b949e'}} />
+                    <Tooltip
+                      contentStyle={{background: '#161b22', border: '1px solid #30363d', borderRadius: 6}}
+                      labelStyle={{color: '#e6edf3'}}
+                      formatter={(v, name) => [v + 'm', name]}
+                    />
+                    <Legend />
+                    {allCats.map(cat => (
+                      <Area key={cat} type="monotone" dataKey={cat}
+                        stackId="1" fill={COLORS[cat]} stroke={COLORS[cat]}
+                        fillOpacity={0.6} />
+                    ))}
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Top projects bar chart */}
+            {projectEntries.length > 1 && (
+              <div className="card full">
+                <h2>Top Projects by Active Time</h2>
+                <ResponsiveContainer width="100%" height={Math.max(200, projectEntries.length * 40)}>
+                  <BarChart data={projectEntries} layout="vertical" margin={{left: 100}}>
+                    <XAxis type="number" tick={{fill: '#8b949e', fontSize: 11}}
+                      tickFormatter={v => formatDuration(v)} />
+                    <YAxis type="category" dataKey="name" tick={{fill: '#8b949e', fontSize: 12}} width={100} />
+                    <Tooltip
+                      contentStyle={{background: '#161b22', border: '1px solid #30363d', borderRadius: 6}}
+                      formatter={(v, name) => [formatDuration(v), name]}
+                    />
+                    <Legend />
+                    {allCats.map(cat => (
+                      <Bar key={cat} dataKey={cat} stackId="a" fill={COLORS[cat]} />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const [data, setData] = useState(null);
+      const [error, setError] = useState(null);
+
+      useEffect(() => {
+        fetch('/data.json')
+          .then(r => r.json())
+          .then(setData)
+          .catch(e => setError(e.message));
+      }, []);
+
+      if (error) return <div className="loading">Error: {error}</div>;
+      if (!data) return <div className="loading">Loading...</div>;
+      if (!data.categoryTotals) return <div className="loading">No data found.</div>;
+      return <Dashboard data={data} />;
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

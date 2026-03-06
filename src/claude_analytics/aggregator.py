@@ -17,12 +17,12 @@ def calculate_active_time(messages: list[Message]) -> int:
     return int(active)
 
 
-def build_activity_blocks(session: Session) -> list[ActivityBlock]:
+def build_activity_blocks(session: Session, use_llm: bool = False) -> list[ActivityBlock]:
     """Break a session into activity blocks based on idle gaps and classification."""
     if not session.messages:
         return []
 
-    classified = classify_session(session.messages)
+    classified = classify_session(session.messages, use_llm=use_llm)
     if not classified:
         return []
 

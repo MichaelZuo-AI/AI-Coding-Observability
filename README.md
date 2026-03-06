@@ -71,6 +71,13 @@ claude-analytics report --project MewtwoAI
 # List recent sessions
 claude-analytics sessions
 claude-analytics sessions --limit 10
+
+# Use LLM reclassification for low-confidence interactions (uses your Claude Code subscription)
+claude-analytics report --llm
+
+# Launch interactive dashboard
+claude-analytics dashboard
+claude-analytics dashboard --port 8080
 ```
 
 ## Classification Categories
@@ -95,10 +102,19 @@ claude-analytics sessions --limit 10
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/ -v   # 63 tests
+pytest tests/ -v   # 87 tests
 ```
 
 ## Changelog
+
+### v0.4.0
+- **Phase 2**: `claude -p` reclassification for low-confidence interactions (`--llm` flag)
+- SQLite cache at `~/.claude-analytics/classification_cache.db` — each interaction classified only once
+- Confidence scoring on rule-based classifier (threshold: 1.5)
+- **Phase 3**: Interactive React + Recharts dashboard (`claude-analytics dashboard`)
+- Dark-themed dashboard with pie charts, stacked area charts, bar charts
+- Daily activity time series, per-project breakdowns, AI code generation stats
+- 87 tests
 
 ### v0.3.1
 - Fixed ZeroDivisionError when a project has zero active time (#1)
@@ -125,5 +141,5 @@ pytest tests/ -v   # 63 tests
 
 - [x] **Phase 1** — Parser + rule-based classifier + colored CLI report
 - [x] **Phase 1.5** — AI code generation metrics (git-based, per-project AI%)
-- [ ] **Phase 2** — Claude Haiku API fallback for low-confidence classification + SQLite cache
-- [ ] **Phase 3** — React + Recharts dashboard
+- [x] **Phase 2** — `claude -p` fallback for low-confidence classification + SQLite cache
+- [x] **Phase 3** — React + Recharts dashboard

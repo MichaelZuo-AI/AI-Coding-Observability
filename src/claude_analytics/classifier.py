@@ -1,8 +1,15 @@
-"""Rule-based intent classification for Claude Code interactions."""
+"""Rule-based intent classification for Claude Code interactions.
+
+Phase 2: Low-confidence interactions are reclassified via `claude -p` (Claude Code CLI)
+and cached in SQLite so repeated runs don't re-invoke the CLI.
+"""
 
 import re
 from .models import Message, ActivityBlock
 from datetime import datetime
+
+# Confidence threshold — below this, we try `claude -p` reclassification
+CONFIDENCE_THRESHOLD = 1.5
 
 RULE_PATTERNS: dict[str, list[re.Pattern]] = {
     "debug": [
@@ -80,6 +87,16 @@ ALL_CATEGORIES = ["coding", "debug", "design", "review", "devops", "data", "chat
 
 def classify_message(message: Message) -> str:
     """Classify a single user message into an activity category."""
+    category, _ = classify_message_with_confidence(message)
+    return category
+
+
+def classify_message_with_confidence(message: Message) -> tuple[str, float]:
+    """Classify a message and return (category, confidence_score).
+
+    The confidence score is the raw score of the winning category.
+    Higher = more confident. Below CONFIDENCE_THRESHOLD is considered low-confidence.
+    """
     text = message.content
     scores: dict[str, float] = {cat: 0 for cat in ALL_CATEGORIES}
 
@@ -100,15 +117,20 @@ def classify_message(message: Message) -> str:
 
     # If no signal at all, return "chat" (not "other")
     if scores[best] == 0:
-        return "chat"
+        return "chat", 0.0
 
-    return best
+    return best, scores[best]
 
 
-def classify_interaction(user_msg: Message, assistant_msg: Message | None) -> str:
+def classify_interaction(
+    user_msg: Message,
+    assistant_msg: Message | None,
+    use_llm: bool = False,
+) -> str:
     """Classify a user-assistant interaction pair.
 
     Uses the user message text + assistant message tool uses.
+    If use_llm=True, low-confidence results are reclassified via `claude -p` with caching.
     """
     combined_tools = assistant_msg.tool_uses if assistant_msg else []
     combined = Message(
@@ -117,14 +139,35 @@ def classify_interaction(user_msg: Message, assistant_msg: Message | None) -> st
         timestamp=user_msg.timestamp,
         tool_uses=combined_tools,
     )
-    return classify_message(combined)
+
+    category, confidence = classify_message_with_confidence(combined)
+
+    if use_llm and confidence < CONFIDENCE_THRESHOLD:
+        from .cache import get_cached, set_cached
+        from .llm_classifier import classify_with_llm
+
+        # Check cache first
+        cached = get_cached(combined.content, combined.tool_uses)
+        if cached:
+            return cached
+
+        # Try LLM reclassification
+        llm_result = classify_with_llm(combined.content, combined.tool_uses)
+        if llm_result:
+            set_cached(combined.content, combined.tool_uses, llm_result)
+            return llm_result
+
+    return category
 
 
-def classify_session(messages: list[Message]) -> list[tuple[Message, str]]:
+def classify_session(
+    messages: list[Message], use_llm: bool = False,
+) -> list[tuple[Message, str]]:
     """Classify all interactions in a session.
 
     Pairs each user message with the following assistant message to get tool signals.
     Returns list of (user_message, category) tuples.
+    If use_llm=True, low-confidence results are reclassified via `claude -p`.
     """
     results = []
     i = 0
@@ -134,7 +177,7 @@ def classify_session(messages: list[Message]) -> list[tuple[Message, str]]:
             assistant_msg = None
             if i + 1 < len(messages) and messages[i + 1].role == "assistant":
                 assistant_msg = messages[i + 1]
-            category = classify_interaction(msg, assistant_msg)
+            category = classify_interaction(msg, assistant_msg, use_llm=use_llm)
             results.append((msg, category))
         i += 1
     return results

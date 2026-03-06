@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-analytics"
-version = "0.3.1"
+version = "0.4.0"
 description = "Analyze Claude Code session logs to understand development lifecycle patterns"
 readme = "README.md"
 license = "MIT"
@@ -38,6 +38,9 @@ claude-analytics = "claude_analytics.main:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+claude_analytics = ["dashboard/*.html", "dashboard/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

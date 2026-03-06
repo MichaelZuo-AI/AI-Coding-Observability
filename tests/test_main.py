@@ -283,7 +283,7 @@ class TestCmdReport:
 
         call_count = [0]
 
-        def mock_build(session):
+        def mock_build(session, **kwargs):
             call_count[0] += 1
             return [coding_block] if call_count[0] == 1 else [debug_block]
 
