@@ -122,12 +122,61 @@ def format_codegen_section(
     return "\n".join(lines)
 
 
+def format_efficiency_section(
+    efficiency: dict,
+    quality: dict,
+) -> str:
+    """Generate the Engineering Efficiency section of the report.
+
+    Expects already-redacted project names in dict keys.
+    """
+    lines: list[str] = []
+    lines.append(f"  {_c(BOLD, 'Engineering Efficiency')}")
+    lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
+
+    for proj_name in sorted(efficiency.keys()):
+        eff = efficiency[proj_name]
+        qual = quality.get(proj_name)
+
+        proj_label = _c(HEADER_COLOR, f"{proj_name}")
+        score_color = CATEGORY_COLORS["coding"] if eff.efficiency_score > 0.5 else CATEGORY_COLORS["debug"]
+        score_str = _c(score_color + BOLD, f"{eff.efficiency_score:.2f}")
+        lines.append(f"  {proj_label}  Score: {score_str}")
+
+        # Output metrics
+        focus_str = _c(ACCENT_COLOR, f"{eff.focus_ratio:.0%}")
+        lines.append(f"    Focus Ratio: {focus_str}")
+
+        if qual:
+            tre_str = _c(ACCENT_COLOR, f"{qual.task_resolution_efficiency:.2f}")
+            rework_str = _c(ACCENT_COLOR, f"{qual.rework_rate:.0%}")
+            oneshot_str = _c(ACCENT_COLOR, f"{qual.one_shot_success_rate:.0%}")
+            lines.append(f"    Task Resolution: {tre_str}  Rework: {rework_str}  One-Shot: {oneshot_str}")
+
+        # Key input metrics
+        debug_str = _c(DIM, f"debug_tax={eff.debug_tax:.2f}")
+        density_str = _c(DIM, f"msgs/h={eff.interaction_density:.0f}")
+        overhead_str = _c(DIM, f"overhead={eff.chat_devops_overhead:.0%}")
+        lines.append(f"    {debug_str}  {density_str}  {overhead_str}")
+
+        if qual and qual.debug_loop_max_depth > 0:
+            loop_str = _c(DIM, f"debug_loops={qual.debug_loop_max_depth}max/{qual.debug_loop_avg_depth:.1f}avg")
+            lines.append(f"    {loop_str}")
+
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def print_report(
     blocks: list[ActivityBlock],
     from_date: datetime | None = None,
     to_date: datetime | None = None,
     codegen_stats: CodeGenStats | None = None,
     codegen_by_project: dict[str, CodeGenStats] | None = None,
+    efficiency_metrics: dict | None = None,
+    quality_metrics: dict | None = None,
+    insights: list | None = None,
 ) -> str:
     """Generate and return the full CLI report string."""
     if not blocks:
@@ -232,5 +281,19 @@ def print_report(
     if codegen_stats and codegen_stats.ai_lines > 0:
         redacted_codegen = redactor.redact_dict(codegen_by_project) if codegen_by_project else None
         lines.append(format_codegen_section(codegen_stats, redacted_codegen))
+
+    # Engineering Efficiency section
+    if efficiency_metrics:
+        redacted_eff = {redactor.redact(k): v for k, v in efficiency_metrics.items()}
+        redacted_qual = {redactor.redact(k): v for k, v in (quality_metrics or {}).items()}
+        lines.append(format_efficiency_section(redacted_eff, redacted_qual))
+
+    # Insights section
+    if insights:
+        from .insights import format_insights
+        lines.append(f"  {_c(BOLD, 'Insights')}")
+        lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
+        lines.append(format_insights(insights))
+        lines.append("")
 
     return "\n".join(lines)

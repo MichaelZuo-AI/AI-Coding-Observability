@@ -11,6 +11,7 @@ from claude_analytics.reporter import (
     _use_color,
     _c,
     format_codegen_section,
+    format_efficiency_section,
     print_report,
     BAR_WIDTH,
     RESET,
@@ -21,6 +22,9 @@ from claude_analytics.reporter import (
 )
 from claude_analytics.models import ActivityBlock
 from claude_analytics.codegen import CodeGenStats
+from claude_analytics.efficiency import EfficiencyMetrics
+from claude_analytics.quality import QualityMetrics
+from claude_analytics.insights import Insight
 
 
 # ---------------------------------------------------------------------------
@@ -478,3 +482,122 @@ class TestPrintReport:
         result = self._report(blocks)
         assert "2026-01-05" in result
         assert "2026-03-20" in result
+
+    def test_efficiency_section_included_when_metrics_provided(self):
+        block = _block("coding", 1800)
+        eff = {"my-project": EfficiencyMetrics(efficiency_score=0.8, focus_ratio=0.9)}
+        with patch("claude_analytics.reporter._use_color", return_value=False):
+            result = print_report([block], efficiency_metrics=eff)
+        assert "Engineering Efficiency" in result
+
+    def test_efficiency_section_excluded_when_no_metrics(self):
+        block = _block("coding", 1800)
+        result = self._report([block])
+        assert "Engineering Efficiency" not in result
+
+    def test_insights_section_included_when_insights_provided(self):
+        block = _block("coding", 1800)
+        insights = [Insight(project="my-project", observation="Test obs.", suggestion="Do this.")]
+        with patch("claude_analytics.reporter._use_color", return_value=False):
+            result = print_report([block], insights=insights)
+        assert "Insights" in result
+        assert "Test obs." in result
+
+    def test_insights_section_excluded_when_empty(self):
+        block = _block("coding", 1800)
+        result = self._report([block])
+        assert "Insights" not in result
+
+
+# ---------------------------------------------------------------------------
+# format_efficiency_section
+# ---------------------------------------------------------------------------
+
+class TestFormatEfficiencySection:
+    """Test format_efficiency_section in no-color mode."""
+
+    def _fmt(self, efficiency: dict, quality: dict = None) -> str:
+        with patch("claude_analytics.reporter._use_color", return_value=False):
+            return format_efficiency_section(efficiency, quality or {})
+
+    def test_header_present(self):
+        eff = {"proj": EfficiencyMetrics(efficiency_score=0.6, focus_ratio=0.8)}
+        result = self._fmt(eff)
+        assert "Engineering Efficiency" in result
+
+    def test_project_name_shown(self):
+        eff = {"alpha-project": EfficiencyMetrics(efficiency_score=0.6, focus_ratio=0.8)}
+        result = self._fmt(eff)
+        assert "alpha-project" in result
+
+    def test_score_shown(self):
+        eff = {"proj": EfficiencyMetrics(efficiency_score=0.75, focus_ratio=0.8)}
+        result = self._fmt(eff)
+        assert "0.75" in result
+
+    def test_focus_ratio_shown(self):
+        eff = {"proj": EfficiencyMetrics(efficiency_score=0.6, focus_ratio=0.8)}
+        result = self._fmt(eff)
+        assert "Focus Ratio" in result
+        assert "80%" in result
+
+    def test_quality_metrics_included_when_provided(self):
+        eff = {"proj": EfficiencyMetrics(efficiency_score=0.6, focus_ratio=0.8)}
+        qual = {"proj": QualityMetrics(
+            task_resolution_efficiency=0.9,
+            rework_rate=0.1,
+            one_shot_success_rate=0.8,
+        )}
+        result = self._fmt(eff, qual)
+        assert "Task Resolution" in result
+        assert "Rework" in result
+        assert "One-Shot" in result
+
+    def test_quality_metrics_excluded_when_not_present_for_project(self):
+        eff = {"proj": EfficiencyMetrics(efficiency_score=0.6, focus_ratio=0.8)}
+        # quality dict has no entry for "proj"
+        result = self._fmt(eff, quality={})
+        assert "Task Resolution" not in result
+
+    def test_debug_loop_line_shown_when_max_depth_positive(self):
+        eff = {"proj": EfficiencyMetrics(efficiency_score=0.6, focus_ratio=0.8)}
+        qual = {"proj": QualityMetrics(debug_loop_max_depth=4, debug_loop_avg_depth=2.5)}
+        result = self._fmt(eff, qual)
+        assert "debug_loops" in result
+        assert "4max" in result
+
+    def test_debug_loop_line_absent_when_max_depth_zero(self):
+        eff = {"proj": EfficiencyMetrics(efficiency_score=0.6, focus_ratio=0.8)}
+        qual = {"proj": QualityMetrics(debug_loop_max_depth=0)}
+        result = self._fmt(eff, qual)
+        assert "debug_loops" not in result
+
+    def test_input_metrics_shown(self):
+        eff = {"proj": EfficiencyMetrics(
+            efficiency_score=0.5, focus_ratio=0.6,
+            debug_tax=0.25, interaction_density=15, chat_devops_overhead=0.2,
+        )}
+        result = self._fmt(eff)
+        assert "debug_tax" in result
+        assert "msgs/h" in result
+        assert "overhead" in result
+
+    def test_projects_sorted_alphabetically(self):
+        eff = {
+            "zebra-proj": EfficiencyMetrics(efficiency_score=0.6, focus_ratio=0.8),
+            "alpha-proj": EfficiencyMetrics(efficiency_score=0.4, focus_ratio=0.6),
+        }
+        result = self._fmt(eff)
+        alpha_pos = result.index("alpha-proj")
+        zebra_pos = result.index("zebra-proj")
+        assert alpha_pos < zebra_pos
+
+    def test_empty_efficiency_returns_header_only(self):
+        result = self._fmt({})
+        assert "Engineering Efficiency" in result
+        # No project data, so no score lines
+        assert "Score:" not in result
+
+    def test_returns_string(self):
+        eff = {"p": EfficiencyMetrics()}
+        assert isinstance(self._fmt(eff), str)

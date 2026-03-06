@@ -13,6 +13,7 @@ from claude_analytics.main import (
     cmd_report,
     cmd_sessions,
     cmd_dashboard,
+    cmd_insights,
     _collect_data,
     _progress,
     _progress_done,
@@ -636,10 +637,136 @@ class TestCollectData:
         assert "my-proj" in result["projectTotals"]
         assert result["projectTotals"]["my-proj"]["coding"] == 600
 
+    def test_collect_data_includes_efficiency_key(self):
+        session = _make_session()
+        result = self._run({}, sessions=[session])
+        assert "efficiency" in result
+
+    def test_collect_data_includes_quality_key(self):
+        session = _make_session()
+        result = self._run({}, sessions=[session])
+        assert "quality" in result
+
+    def test_efficiency_entry_has_expected_fields(self):
+        session = _make_session(project="p")
+        block = _make_block_at(datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc), "coding", 600, "p")
+        result = self._run({}, sessions=[session], blocks_per_session=[[block]])
+        if result["efficiency"]:
+            proj_key = next(iter(result["efficiency"]))
+            entry = result["efficiency"][proj_key]
+            for field in ("focusRatio", "efficiencyScore", "debugTax",
+                          "interactionDensity", "chatDevopsOverhead",
+                          "designSeconds", "codingSeconds", "deploymentSeconds"):
+                assert field in entry, f"Missing field: {field}"
+
+    def test_quality_entry_has_expected_fields(self):
+        session = _make_session(project="p")
+        block = _make_block_at(datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc), "coding", 600, "p")
+        result = self._run({}, sessions=[session], blocks_per_session=[[block]])
+        if result["quality"]:
+            proj_key = next(iter(result["quality"]))
+            entry = result["quality"][proj_key]
+            for field in ("taskResolutionEfficiency", "reworkRate", "oneShotSuccessRate",
+                          "debugLoopMaxDepth", "debugLoopAvgDepth", "contextSwitchFrequency"):
+                assert field in entry, f"Missing field: {field}"
+
 
 # ---------------------------------------------------------------------------
 # cmd_dashboard
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# cmd_insights
+# ---------------------------------------------------------------------------
+
+class TestCmdInsights:
+    def _run(self, args_kwargs: dict, sessions, blocks) -> str:
+        args = _make_args(**args_kwargs)
+        captured = StringIO()
+
+        call_index = [0]
+
+        def mock_build(session, **kw):
+            idx = call_index[0]
+            call_index[0] += 1
+            return [blocks[idx]] if idx < len(blocks) else []
+
+        with (
+            patch("claude_analytics.main.parse_all_sessions", return_value=sessions),
+            patch("claude_analytics.main.build_activity_blocks", side_effect=mock_build),
+            patch("claude_analytics.main.extract_project_dirs", return_value={}),
+            patch("sys.stdout", captured),
+        ):
+            cmd_insights(args)
+        return captured.getvalue()
+
+    def test_no_sessions_prints_message(self):
+        output = self._run({}, sessions=[], blocks=[])
+        assert "No sessions found" in output
+
+    def test_date_filter_excludes_old_sessions(self):
+        old_session = _make_session(
+            start=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            end=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        )
+        output = self._run({"from_date": "2026-02-01"}, sessions=[old_session], blocks=[])
+        assert "No sessions found for the specified date range" in output
+
+    def test_date_filter_excludes_future_sessions(self):
+        future_session = _make_session(
+            start=datetime(2026, 5, 1, tzinfo=timezone.utc),
+            end=datetime(2026, 5, 2, tzinfo=timezone.utc),
+        )
+        output = self._run({"to_date": "2026-03-01"}, sessions=[future_session], blocks=[])
+        assert "No sessions found for the specified date range" in output
+
+    def test_with_sessions_prints_insights_header(self):
+        session = _make_session()
+        block = _make_block()
+        output = self._run({}, sessions=[session], blocks=[block])
+        assert "Engineering Efficiency Insights" in output
+
+    def test_with_sessions_calls_format_insights(self):
+        """Output should contain the formatted insights section (even if empty)."""
+        session = _make_session()
+        block = _make_block()
+        output = self._run({}, sessions=[session], blocks=[block])
+        # format_insights returns "No insights generated" when there's not enough data
+        # or outputs project insights. Either way, the section heading appears.
+        assert "Engineering Efficiency Insights" in output
+
+    def test_projects_dir_passed_through(self):
+        args = _make_args(projects_dir="/custom/path")
+        captured_dirs = []
+
+        def mock_parse(projects_dir, project_filter=None, **kw):
+            captured_dirs.append(projects_dir)
+            return []
+
+        with (
+            patch("claude_analytics.main.parse_all_sessions", side_effect=mock_parse),
+            patch("sys.stdout", StringIO()),
+        ):
+            cmd_insights(args)
+
+        assert str(captured_dirs[0]) == "/custom/path"
+
+    def test_project_filter_passed_through(self):
+        args = _make_args(project="filtered-project")
+        captured_filters = []
+
+        def mock_parse(projects_dir, project_filter=None, **kw):
+            captured_filters.append(project_filter)
+            return []
+
+        with (
+            patch("claude_analytics.main.parse_all_sessions", side_effect=mock_parse),
+            patch("sys.stdout", StringIO()),
+        ):
+            cmd_insights(args)
+
+        assert captured_filters[0] == "filtered-project"
+
 
 class TestCmdDashboard:
     def _make_dashboard_args(self, **kwargs):
