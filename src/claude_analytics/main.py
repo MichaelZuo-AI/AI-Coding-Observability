@@ -11,6 +11,7 @@ from .parser import parse_all_sessions, CLAUDE_PROJECTS_DIR
 from .aggregator import build_activity_blocks, aggregate_by_category, aggregate_by_project
 from .codegen import analyze_codegen, analyze_codegen_by_project
 from .reporter import print_report
+from .privacy import ProjectRedactor
 
 
 _BAR_WIDTH = 20
@@ -133,6 +134,9 @@ def _collect_data(args: argparse.Namespace) -> dict:
 
     _progress_done()
 
+    # PII redaction
+    redactor = ProjectRedactor()
+
     earliest = min(b.start_time for b in all_blocks) if all_blocks else None
     latest = max(b.start_time for b in all_blocks) if all_blocks else None
 
@@ -155,9 +159,7 @@ def _collect_data(args: argparse.Namespace) -> dict:
             "to": latest.isoformat() if latest else None,
         },
         "categoryTotals": cat_totals,
-        "projectTotals": {
-            proj: cats for proj, cats in proj_totals.items()
-        },
+        "projectTotals": redactor.redact_dict(proj_totals),
         "dailySeries": daily_series,
         "codegen": {
             "aiLines": codegen_stats.ai_lines,
@@ -168,7 +170,7 @@ def _collect_data(args: argparse.Namespace) -> dict:
             "filesTouched": len(codegen_stats.files_touched),
         },
         "codegenByProject": {
-            proj: {
+            redactor.redact(proj): {
                 "aiLines": s.ai_lines,
                 "totalLines": s.total_lines,
                 "aiPercentage": round(s.ai_percentage, 1),
@@ -242,11 +244,13 @@ def cmd_sessions(args: argparse.Namespace) -> None:
     # Sort by start time, most recent first
     sessions.sort(key=lambda s: s.start_time or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
 
+    redactor = ProjectRedactor()
     limit = args.limit or 20
     for session in sessions[:limit]:
         user_msgs = sum(1 for m in session.messages if m.role == "user")
         start = session.start_time.strftime("%Y-%m-%d %H:%M") if session.start_time else "unknown"
-        print(f"  {start}  {session.project:<25} {user_msgs:>3} msgs  {session.session_id[:8]}")
+        proj = redactor.redact(session.project)
+        print(f"  {start}  {proj:<25} {user_msgs:>3} msgs  {session.session_id[:8]}")
 
 
 def app() -> None:

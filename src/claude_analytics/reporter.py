@@ -5,6 +5,7 @@ import sys
 from datetime import datetime
 from .models import ActivityBlock
 from .codegen import CodeGenStats
+from .privacy import ProjectRedactor
 
 CATEGORY_ORDER = ["coding", "debug", "design", "devops", "review", "data", "chat", "other"]
 BAR_WIDTH = 20
@@ -150,12 +151,14 @@ def print_report(
     if total_seconds == 0:
         return "No active time recorded for the specified period."
 
-    # Project totals
+    # Project totals (with PII redaction)
+    redactor = ProjectRedactor()
     proj_totals: dict[str, dict[str, int]] = {}
     for b in blocks:
-        if b.project not in proj_totals:
-            proj_totals[b.project] = {}
-        p = proj_totals[b.project]
+        proj_name = redactor.redact(b.project)
+        if proj_name not in proj_totals:
+            proj_totals[proj_name] = {}
+        p = proj_totals[proj_name]
         p[b.category] = p.get(b.category, 0) + b.duration_seconds
 
     # Date range
@@ -225,8 +228,9 @@ def print_report(
 
         lines.append("")
 
-    # AI Code Generation section
+    # AI Code Generation section (redact project names)
     if codegen_stats and codegen_stats.ai_lines > 0:
-        lines.append(format_codegen_section(codegen_stats, codegen_by_project))
+        redacted_codegen = redactor.redact_dict(codegen_by_project) if codegen_by_project else None
+        lines.append(format_codegen_section(codegen_stats, redacted_codegen))
 
     return "\n".join(lines)
