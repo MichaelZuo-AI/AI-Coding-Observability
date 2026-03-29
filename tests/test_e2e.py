@@ -196,7 +196,7 @@ class TestReportE2E:
 
     def test_report_shows_header(self, projects_dir):
         result = _run_cli("report", projects_dir=str(projects_dir))
-        assert "Claude Code Analytics" in result.stdout
+        assert "Agent Autonomy Score" in result.stdout
 
     def test_report_shows_engineer(self, projects_dir):
         result = _run_cli("report", projects_dir=str(projects_dir))
@@ -240,7 +240,7 @@ class TestReportE2E:
             projects_dir=str(projects_dir),
         )
         assert result.returncode == 0
-        assert "Claude Code Analytics" in result.stdout
+        assert "Agent Autonomy Score" in result.stdout
 
     def test_report_date_filter_excludes_all(self, projects_dir):
         result = _run_cli(
@@ -257,7 +257,7 @@ class TestReportE2E:
         )
         assert result.returncode == 0
         # Should still produce a report since MyApp sessions exist
-        assert "Claude Code Analytics" in result.stdout or "No sessions found" not in result.stdout
+        assert "Agent Autonomy Score" in result.stdout or "No sessions found" not in result.stdout
 
     def test_report_project_filter_no_match(self, projects_dir):
         result = _run_cli(
@@ -270,7 +270,7 @@ class TestReportE2E:
     def test_report_single_session(self, single_session_dir):
         result = _run_cli("report", projects_dir=str(single_session_dir))
         assert result.returncode == 0
-        assert "Claude Code Analytics" in result.stdout
+        assert "Agent Autonomy Score" in result.stdout
 
     def test_report_no_color_when_piped(self, projects_dir):
         """When stdout is piped (not a TTY), ANSI codes should be absent."""
@@ -422,7 +422,7 @@ class TestEdgeCasesE2E:
 
         result = _run_cli("report", projects_dir=str(tmp_path))
         assert result.returncode == 0
-        assert "Claude Code Analytics" in result.stdout
+        assert "Agent Autonomy Score" in result.stdout
 
     def test_idle_gap_detection(self, tmp_path):
         """Messages >10min apart should create separate activity blocks."""
@@ -446,7 +446,7 @@ class TestEdgeCasesE2E:
         result = _run_cli("report", projects_dir=str(tmp_path))
         assert result.returncode == 0
         # Should show multiple categories since the blocks span coding → debug
-        assert "Claude Code Analytics" in result.stdout
+        assert "Agent Autonomy Score" in result.stdout
 
     def test_progress_on_stderr(self, projects_dir):
         """Progress messages should go to stderr, not stdout."""

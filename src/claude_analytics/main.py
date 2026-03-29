@@ -1,4 +1,4 @@
-"""CLI entrypoint for Claude Code Analytics."""
+"""CLI entrypoint for Agent Autonomy Score."""
 
 import argparse
 import sys

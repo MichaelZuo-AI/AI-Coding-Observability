@@ -169,7 +169,7 @@ class TestCmdReport:
         session = _make_session()
         block = _make_block()
         output = self._run({}, sessions=[session], blocks=[block])
-        assert "Claude Code Analytics" in output
+        assert "Agent Autonomy Score" in output
 
     def test_date_filter_excludes_old_sessions(self):
         old_session = _make_session(
@@ -206,7 +206,7 @@ class TestCmdReport:
             sessions=[session],
             blocks=[block],
         )
-        assert "Claude Code Analytics" in output
+        assert "Agent Autonomy Score" in output
 
     def test_projects_dir_passed_to_parser(self):
         args = _make_args(projects_dir="/tmp/my-claude-projects")

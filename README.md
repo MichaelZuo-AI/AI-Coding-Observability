@@ -1,8 +1,8 @@
-# Claude Code Analytics
+# Agent Autonomy Score
 
 A local-first CLI tool that measures how effectively you orchestrate AI coding agents. Parses Claude Code session logs and scores each session by **orchestration precision** — how many corrections you needed after stating your initial intent.
 
-![Claude Code Analytics Dashboard](docs/dashboard.png)
+![Agent Autonomy Score Dashboard](docs/dashboard.png)
 
 ## How It Works
 

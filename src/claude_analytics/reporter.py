@@ -210,7 +210,7 @@ def print_report(
     # --- Header ---
     lines.append("")
     lines.append(_c(LINE_COLOR, "\u2550" * 50))
-    lines.append(f"  {_c(HEADER_COLOR + BOLD, 'Claude Code Analytics')}")
+    lines.append(f"  {_c(HEADER_COLOR + BOLD, 'Agent Autonomy Score')}")
     if earliest and latest:
         lines.append(f"  {_c(ACCENT_COLOR, earliest.strftime('%Y-%m-%d'))} ~ {_c(ACCENT_COLOR, latest.strftime('%Y-%m-%d'))}")
     lines.append(f"  Engineer: {_c(HEADER_COLOR, user)}")
@@ -539,7 +539,7 @@ def render_html_report(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Claude Code Analytics</title>
+<title>Agent Autonomy Score</title>
 <style>
 *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
 body{{
@@ -636,7 +636,7 @@ h1{{
 <body>
 <div class="container">
 
-<h1>Claude Code Analytics</h1>
+<h1>Agent Autonomy Score</h1>
 <div class="subtitle">{_html_escape(date_range_str)}</div>
 <div class="subtitle">Engineer: {_html_escape(user)}</div>
 {streak_badge}
