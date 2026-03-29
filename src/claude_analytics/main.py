@@ -1,7 +1,6 @@
 """CLI entrypoint for Claude Code Analytics."""
 
 import argparse
-import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -101,14 +100,19 @@ def cmd_report(args: argparse.Namespace) -> None:
     )
     print(report)
 
-    # Save report as markdown
-    _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
-    plain = _ANSI_RE.sub("", report)
+    # Save report as HTML
+    from .reporter import render_html_report
+    html = render_html_report(
+        orchestration_sessions=orchestration_sessions,
+        blocks=all_blocks,
+        codegen_stats=codegen_stats,
+        insights=insights_list,
+    )
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
     today = datetime.now().strftime("%Y-%m-%d")
-    report_path = reports_dir / f"{today}.md"
-    report_path.write_text(f"```\n{plain}\n```\n")
+    report_path = reports_dir / f"{today}.html"
+    report_path.write_text(html)
     print(f"  Report saved to {report_path}", file=sys.stderr)
 
 
