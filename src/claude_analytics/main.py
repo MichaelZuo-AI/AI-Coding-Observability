@@ -1,6 +1,7 @@
 """CLI entrypoint for Claude Code Analytics."""
 
 import argparse
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -99,6 +100,16 @@ def cmd_report(args: argparse.Namespace) -> None:
         insights=insights_list,
     )
     print(report)
+
+    # Save report as markdown
+    _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+    plain = _ANSI_RE.sub("", report)
+    reports_dir = Path("reports")
+    reports_dir.mkdir(exist_ok=True)
+    today = datetime.now().strftime("%Y-%m-%d")
+    report_path = reports_dir / f"{today}.md"
+    report_path.write_text(f"```\n{plain}\n```\n")
+    print(f"  Report saved to {report_path}", file=sys.stderr)
 
 
 def cmd_sessions(args: argparse.Namespace) -> None:
