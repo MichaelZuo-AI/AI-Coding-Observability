@@ -31,6 +31,23 @@ HEADER_COLOR = "\033[38;5;75m"   # bright blue
 ACCENT_COLOR = "\033[38;5;228m"  # yellow
 LINE_COLOR = "\033[38;5;240m"    # dark gray
 
+# Engagement tier thresholds and labels (inspired by copilot-usage-advanced-dashboard)
+ENGAGEMENT_TIERS = [
+    (0.9, "Power User",  "\033[38;5;75m"),   # blue
+    (0.7, "Strong",      "\033[38;5;82m"),   # green
+    (0.5, "Productive",  "\033[38;5;228m"),  # yellow
+    (0.3, "Developing",  "\033[38;5;208m"),  # orange
+    (0.0, "Low",         "\033[38;5;203m"),  # red
+]
+
+
+def engagement_tier(score: float) -> tuple[str, str]:
+    """Map an efficiency score (0-1) to an engagement tier name and ANSI color."""
+    for threshold, label, color in ENGAGEMENT_TIERS:
+        if score >= threshold:
+            return label, color
+    return "Low", "\033[38;5;203m"
+
 
 def _use_color() -> bool:
     return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
@@ -139,9 +156,10 @@ def format_efficiency_section(
         qual = quality.get(proj_name)
 
         proj_label = _c(HEADER_COLOR, f"{proj_name}")
-        score_color = CATEGORY_COLORS["coding"] if eff.efficiency_score > 0.5 else CATEGORY_COLORS["debug"]
-        score_str = _c(score_color + BOLD, f"{eff.efficiency_score:.2f}")
-        lines.append(f"  {proj_label}  Score: {score_str}")
+        tier_name, tier_color = engagement_tier(eff.efficiency_score)
+        score_str = _c(tier_color + BOLD, f"{eff.efficiency_score:.2f}")
+        tier_str = _c(tier_color, f"[{tier_name}]")
+        lines.append(f"  {proj_label}  Score: {score_str} {tier_str}")
 
         # Output metrics
         focus_str = _c(ACCENT_COLOR, f"{eff.focus_ratio:.0%}")
