@@ -6,8 +6,6 @@ from claude_analytics.parser import parse_session
 from claude_analytics.aggregator import (
     calculate_active_time,
     build_activity_blocks,
-    aggregate_by_category,
-    aggregate_by_project,
 )
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -25,7 +23,7 @@ def test_calculate_active_time_coding():
     session = parse_session(PROJECT_DIR / "coding-session-001.jsonl")
     assert session is not None
     active = calculate_active_time(session.messages)
-    # 4 user msgs at 5-min intervals → ~15 min = 900s of active time (minus some)
+    # 4 user msgs at 5-min intervals -> ~15 min = 900s of active time (minus some)
     assert 0 < active <= 1200
 
 
@@ -34,7 +32,6 @@ def test_calculate_active_time_excludes_idle():
     assert session is not None
     active = calculate_active_time(session.messages)
     # Has a 15-min idle gap which should be excluded
-    # Total span is 25 min, but idle gap removes ~15 min
     assert active < 25 * 60
 
 
@@ -43,9 +40,8 @@ def test_build_activity_blocks_coding():
     assert session is not None
     blocks = build_activity_blocks(session)
     assert len(blocks) >= 1
-    # Coding session should be classified mostly as coding
-    categories = [b.category for b in blocks]
-    assert "coding" in categories
+    # All blocks have category "session" in the new aggregator
+    assert all(b.category == "session" for b in blocks)
 
 
 def test_build_activity_blocks_debug():
@@ -53,8 +49,7 @@ def test_build_activity_blocks_debug():
     assert session is not None
     blocks = build_activity_blocks(session)
     assert len(blocks) >= 1
-    categories = [b.category for b in blocks]
-    assert "debug" in categories
+    assert all(b.category == "session" for b in blocks)
 
 
 def test_build_activity_blocks_with_idle_gap():
@@ -65,31 +60,8 @@ def test_build_activity_blocks_with_idle_gap():
     assert len(blocks) >= 2
 
 
-def test_aggregate_by_category():
-    session = parse_session(PROJECT_DIR / "coding-session-001.jsonl")
-    assert session is not None
-    blocks = build_activity_blocks(session)
-    totals = aggregate_by_category(blocks)
-    assert sum(totals.values()) > 0
-
-
 def test_aggregate_by_project():
     session = parse_session(PROJECT_DIR / "coding-session-001.jsonl")
     assert session is not None
     blocks = build_activity_blocks(session)
-    proj_totals = aggregate_by_project(blocks)
-    assert "test-project" in proj_totals
-
-
-def test_aggregate_multiple_sessions():
-    sessions = [
-        parse_session(PROJECT_DIR / "coding-session-001.jsonl"),
-        parse_session(PROJECT_DIR / "debug-session-001.jsonl"),
-    ]
-    all_blocks = []
-    for s in sessions:
-        assert s is not None
-        all_blocks.extend(build_activity_blocks(s))
-    totals = aggregate_by_category(all_blocks)
-    assert "coding" in totals
-    assert "debug" in totals
+    assert all(b.project == "test-project" for b in blocks)

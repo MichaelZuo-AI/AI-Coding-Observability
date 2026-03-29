@@ -1,14 +1,13 @@
-"""CLI output formatting for analytics reports."""
+"""CLI output formatting for analytics reports (orchestration model)."""
 
 import os
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
-from .models import ActivityBlock
+from .models import ActivityBlock, OrchestrationSession
 from .codegen import CodeGenStats
 from .privacy import ProjectRedactor
 
-CATEGORY_ORDER = ["coding", "debug", "design", "devops", "review", "data", "chat", "other"]
 BAR_WIDTH = 20
 
 # ANSI color codes
@@ -16,38 +15,32 @@ RESET = "\033[0m"
 BOLD = "\033[1m"
 DIM = "\033[2m"
 
-# Category colors
-CATEGORY_COLORS = {
-    "coding": "\033[38;5;82m",   # green
-    "debug": "\033[38;5;203m",   # red
-    "design": "\033[38;5;141m",  # purple
-    "devops": "\033[38;5;208m",  # orange
-    "review": "\033[38;5;81m",   # cyan
-    "data": "\033[38;5;219m",    # pink
-    "chat": "\033[38;5;252m",    # light gray
-    "other": "\033[38;5;245m",   # gray
-}
-
 HEADER_COLOR = "\033[38;5;75m"   # bright blue
 ACCENT_COLOR = "\033[38;5;228m"  # yellow
 LINE_COLOR = "\033[38;5;240m"    # dark gray
 
-# Engagement tier thresholds and labels (inspired by copilot-usage-advanced-dashboard)
-ENGAGEMENT_TIERS = [
-    (0.9, "Power User",  "\033[38;5;75m"),   # blue
-    (0.7, "Strong",      "\033[38;5;82m"),   # green
-    (0.5, "Productive",  "\033[38;5;228m"),  # yellow
-    (0.3, "Developing",  "\033[38;5;208m"),  # orange
-    (0.0, "Low",         "\033[38;5;203m"),  # red
+# Orchestration tier colors
+TIER_COLORS = {
+    "flawless": "\033[38;5;75m",   # blue
+    "clean": "\033[38;5;82m",      # green
+    "guided": "\033[38;5;228m",    # yellow
+    "heavy": "\033[38;5;203m",     # red
+}
+
+PRECISION_TIERS = [
+    (1.0, "Flawless", "\033[38;5;75m"),
+    (0.50, "Clean", "\033[38;5;82m"),
+    (0.25, "Guided", "\033[38;5;228m"),
+    (0.0, "Heavy", "\033[38;5;203m"),
 ]
 
 
-def engagement_tier(score: float) -> tuple[str, str]:
-    """Map an efficiency score (0-1) to an engagement tier name and ANSI color."""
-    for threshold, label, color in ENGAGEMENT_TIERS:
+def precision_tier_label(score: float) -> tuple[str, str]:
+    """Map a precision score (0-1) to a tier label and ANSI color."""
+    for threshold, label, color in PRECISION_TIERS:
         if score >= threshold:
             return label, color
-    return "Low", "\033[38;5;203m"
+    return "Heavy", "\033[38;5;203m"
 
 
 def _use_color() -> bool:
@@ -72,9 +65,9 @@ def format_duration(seconds: int) -> str:
         return f"{seconds}s"
 
 
-def _bar(fraction: float, category: str, width: int = BAR_WIDTH) -> str:
+def _bar(fraction: float, tier: str = "clean", width: int = BAR_WIDTH) -> str:
     filled = int(fraction * width)
-    color = CATEGORY_COLORS.get(category, "")
+    color = TIER_COLORS.get(tier, "")
     bar_filled = "\u2588" * filled
     bar_empty = "\u2591" * (width - filled)
     if _use_color():
@@ -118,15 +111,10 @@ DAY_LABELS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
 
 
 def format_heatmap(blocks: list[ActivityBlock], max_weeks: int = 20) -> str:
-    """Render a GitHub-style ASCII contribution heatmap from activity blocks.
-
-    Shows a 7-row (Mon-Sun) x N-week grid using Unicode block characters
-    at varying intensities based on daily active seconds.
-    """
+    """Render a GitHub-style ASCII contribution heatmap from activity blocks."""
     if not blocks:
         return ""
 
-    # Aggregate seconds per date
     daily: dict[datetime, int] = defaultdict(int)
     for b in blocks:
         daily[b.start_time.date()] += b.duration_seconds
@@ -134,22 +122,18 @@ def format_heatmap(blocks: list[ActivityBlock], max_weeks: int = 20) -> str:
     if not daily:
         return ""
 
-    # Determine date range
     min_date = min(daily.keys())
     max_date = max(daily.keys())
 
-    # Align to Monday start
     start = min_date - timedelta(days=min_date.weekday())
     end = max_date + timedelta(days=6 - max_date.weekday())
 
-    # Limit to max_weeks
     total_days = (end - start).days + 1
     total_weeks = total_days // 7
     if total_weeks > max_weeks:
         start = end - timedelta(days=max_weeks * 7 - 1)
         start = start - timedelta(days=start.weekday())
 
-    # Compute intensity thresholds from actual data
     values = [v for v in daily.values() if v > 0]
     if not values:
         return ""
@@ -201,255 +185,130 @@ def _trend_arrow(current: float, previous: float) -> str:
         return _c("\033[38;5;228m", "\u2192")  # yellow flat
 
 
-def format_codegen_section(
-    stats: CodeGenStats,
-    project_stats: dict[str, CodeGenStats] | None = None,
-) -> str:
-    """Generate the AI Code Generation section of the report."""
-    lines: list[str] = []
-
-    GREEN = CATEGORY_COLORS["coding"]
-
-    lines.append(f"  {_c(BOLD, 'AI Code Generation')}")
-    lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
-
-    # Overall AI percentage
-    if stats.total_lines > 0:
-        pct = stats.ai_percentage
-        bar = _bar(pct / 100, "coding", BAR_WIDTH)
-        lines.append(f"  {_c(BOLD, 'AI-generated')}  {bar}  {_c(BOLD + ACCENT_COLOR, f'{pct:.0f}%')}")
-        lines.append(f"  {_c(DIM, f'  {stats.ai_lines:,} AI lines / {stats.total_lines:,} total lines')}")
-    else:
-        lines.append(f"  {_c(BOLD, 'AI lines')}        {_c(BOLD + ACCENT_COLOR, f'{stats.ai_lines:>8,}')}")
-
-    lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
-    lines.append(f"  {_c(DIM, 'AI commits')}          {_c(BOLD, str(stats.ai_commits))}")
-    lines.append(f"  {_c(DIM, 'Total commits')}       {_c(BOLD, str(stats.total_commits))}")
-    lines.append(f"  {_c(DIM, 'Files touched')}       {_c(BOLD, str(len(stats.files_touched)))}")
-    lines.append("")
-
-    # Per-project breakdown with percentages
-    if project_stats:
-        lines.append(f"  {_c(BOLD, 'AI % by Project')}")
-        lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
-
-        sorted_projects = sorted(
-            project_stats.items(),
-            key=lambda x: x[1].ai_lines,
-            reverse=True,
-        )
-        for proj_name, pstats in sorted_projects[:10]:
-            if pstats.ai_lines <= 0:
-                continue
-            if pstats.total_lines > 0:
-                pct = pstats.ai_percentage
-                mini_bar = _bar(pct / 100, "coding", 10)
-                pct_str = _c(BOLD + ACCENT_COLOR, f"{pct:>3.0f}%")
-                lines.append(
-                    f"  {_c(HEADER_COLOR, f'{proj_name:<18}')} {mini_bar} {pct_str}"
-                    f"  {_c(DIM, f'{pstats.ai_lines:,}/{pstats.total_lines:,}')}"
-                )
-            else:
-                lines.append(
-                    f"  {_c(HEADER_COLOR, f'{proj_name:<18}')} "
-                    f"{_c(BOLD, f'{pstats.ai_lines:>6,}')} lines"
-                )
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-def format_efficiency_section(
-    efficiency: dict,
-    quality: dict,
-) -> str:
-    """Generate the Engineering Efficiency section of the report.
-
-    Expects already-redacted project names in dict keys.
-    """
-    lines: list[str] = []
-    lines.append(f"  {_c(BOLD, 'Engineering Efficiency')}")
-    lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
-
-    for proj_name in sorted(efficiency.keys()):
-        eff = efficiency[proj_name]
-        qual = quality.get(proj_name)
-
-        proj_label = _c(HEADER_COLOR, f"{proj_name}")
-        tier_name, tier_color = engagement_tier(eff.efficiency_score)
-        score_str = _c(tier_color + BOLD, f"{eff.efficiency_score:.2f}")
-        tier_str = _c(tier_color, f"[{tier_name}]")
-        lines.append(f"  {proj_label}  Score: {score_str} {tier_str}")
-
-        # Output metrics
-        focus_str = _c(ACCENT_COLOR, f"{eff.focus_ratio:.0%}")
-        lines.append(f"    Focus Ratio: {focus_str}")
-
-        if qual:
-            tre_str = _c(ACCENT_COLOR, f"{qual.task_resolution_efficiency:.2f}")
-            rework_str = _c(ACCENT_COLOR, f"{qual.rework_rate:.0%}")
-            oneshot_str = _c(ACCENT_COLOR, f"{qual.one_shot_success_rate:.0%}")
-            lines.append(f"    Task Resolution: {tre_str}  Rework: {rework_str}  One-Shot: {oneshot_str}")
-
-        # Key input metrics
-        debug_str = _c(DIM, f"debug_tax={eff.debug_tax:.2f}")
-        density_str = _c(DIM, f"msgs/h={eff.interaction_density:.0f}")
-        overhead_str = _c(DIM, f"overhead={eff.chat_devops_overhead:.0%}")
-        lines.append(f"    {debug_str}  {density_str}  {overhead_str}")
-
-        if qual and qual.debug_loop_max_depth > 0:
-            loop_str = _c(DIM, f"debug_loops={qual.debug_loop_max_depth}max/{qual.debug_loop_avg_depth:.1f}avg")
-            lines.append(f"    {loop_str}")
-
-        lines.append("")
-
-    return "\n".join(lines)
-
-
 def print_report(
+    orchestration_sessions: list[OrchestrationSession],
     blocks: list[ActivityBlock],
-    from_date: datetime | None = None,
-    to_date: datetime | None = None,
     codegen_stats: CodeGenStats | None = None,
-    codegen_by_project: dict[str, CodeGenStats] | None = None,
-    efficiency_metrics: dict | None = None,
-    quality_metrics: dict | None = None,
     insights: list | None = None,
 ) -> str:
-    """Generate and return the full CLI report string."""
-    if not blocks:
-        return "No activity data found for the specified period."
+    """Generate and return the full CLI report string (orchestration model)."""
+    if not orchestration_sessions:
+        return "No orchestration sessions found."
 
-    # Filter by date range
-    if from_date:
-        blocks = [b for b in blocks if b.start_time >= from_date]
-    if to_date:
-        blocks = [b for b in blocks if b.start_time <= to_date]
-
-    if not blocks:
-        return "No activity data found for the specified period."
-
-    # Category totals
-    cat_totals: dict[str, int] = {}
-    for b in blocks:
-        cat_totals[b.category] = cat_totals.get(b.category, 0) + b.duration_seconds
-    total_seconds = sum(cat_totals.values())
-
-    if total_seconds == 0:
-        return "No active time recorded for the specified period."
-
-    # Project totals (with PII redaction)
     redactor = ProjectRedactor()
-    proj_totals: dict[str, dict[str, int]] = {}
-    for b in blocks:
-        proj_name = redactor.redact(b.project)
-        if proj_name not in proj_totals:
-            proj_totals[proj_name] = {}
-        p = proj_totals[proj_name]
-        p[b.category] = p.get(b.category, 0) + b.duration_seconds
 
-    # Date range
-    earliest = min(b.start_time for b in blocks)
-    latest = max(b.start_time for b in blocks)
-
-    # Compute half-period totals for trend arrows
-    midpoint = earliest + (latest - earliest) / 2
-    first_half_secs = sum(b.duration_seconds for b in blocks if b.start_time < midpoint)
-    second_half_secs = sum(b.duration_seconds for b in blocks if b.start_time >= midpoint)
+    # Date range from blocks
+    earliest = None
+    latest = None
+    if blocks:
+        earliest = min(b.start_time for b in blocks)
+        latest = max(b.start_time for b in blocks)
 
     user = os.environ.get("USER", "engineer")
     lines: list[str] = []
 
-    # Header
+    # --- Header ---
     lines.append("")
     lines.append(_c(LINE_COLOR, "\u2550" * 50))
     lines.append(f"  {_c(HEADER_COLOR + BOLD, 'Claude Code Analytics')}")
-    lines.append(f"  {_c(ACCENT_COLOR, earliest.strftime('%Y-%m-%d'))} ~ {_c(ACCENT_COLOR, latest.strftime('%Y-%m-%d'))}")
+    if earliest and latest:
+        lines.append(f"  {_c(ACCENT_COLOR, earliest.strftime('%Y-%m-%d'))} ~ {_c(ACCENT_COLOR, latest.strftime('%Y-%m-%d'))}")
     lines.append(f"  Engineer: {_c(HEADER_COLOR, user)}")
 
     current_streak, longest_streak = compute_streaks(blocks)
     if longest_streak > 0:
-        streak_icon = "\U0001f525" if _use_color() else "*"
         lines.append(f"  Streak: {_c(ACCENT_COLOR, f'{current_streak}d')} current  {_c(DIM, f'{longest_streak}d longest')}")
 
     lines.append(_c(LINE_COLOR, "\u2550" * 50))
     lines.append("")
 
-    # Category breakdown
-    lines.append(f"  {_c(BOLD, 'Active Time Breakdown')}")
+    # --- Orchestration Precision ---
+    total_sessions = len(orchestration_sessions)
+    avg_precision = sum(s.precision_score for s in orchestration_sessions) / total_sessions
+    zero_touch = sum(1 for s in orchestration_sessions if s.steering_count == 0)
+    zero_touch_rate = zero_touch / total_sessions
+
+    tier_label, tier_color = precision_tier_label(avg_precision)
+
+    lines.append(f"  {_c(BOLD, 'Orchestration Precision')}")
     lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
 
-    for cat in CATEGORY_ORDER:
-        secs = cat_totals.get(cat, 0)
-        if secs == 0:
-            continue
-        frac = secs / total_seconds
-        pct = frac * 100
-        color = CATEGORY_COLORS.get(cat, "")
-        bar = _bar(frac, cat)
-        dur = format_duration(secs)
-        cat_label = _c(color, f"{cat:<10}")
-        pct_str = _c(ACCENT_COLOR, f"{pct:4.0f}%")
-        dur_str = _c(BOLD, f"{dur:>5}")
-        lines.append(f"  {cat_label} {bar}  {pct_str}  {dur_str}")
-
-    lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
-    total_label = _c(BOLD, "Total Active")
-    total_dur = _c(BOLD + ACCENT_COLOR, format_duration(total_seconds))
-    trend = _trend_arrow(second_half_secs, first_half_secs)
-    trend_suffix = f" {trend}" if trend else ""
-    lines.append(f"  {total_label:<34}  {_c(ACCENT_COLOR, '100%')}  {total_dur:>5}{trend_suffix}")
+    bar = _bar(avg_precision, tier_label.lower())
+    score_str = _c(tier_color + BOLD, f"{avg_precision:.2f}")
+    tier_str = _c(tier_color, f"[{tier_label}]")
+    lines.append(f"  {_c(BOLD, 'Score')}       {bar}  {score_str} {tier_str}")
+    lines.append(f"  {_c(DIM, 'Zero-touch')}   {_c(ACCENT_COLOR, f'{zero_touch_rate:.0%}')} ({zero_touch}/{total_sessions} sessions)")
+    lines.append(f"  {_c(DIM, 'Sessions')}     {_c(BOLD, str(total_sessions))}")
     lines.append("")
 
-    # Activity heatmap
+    # --- Session Breakdown ---
+    tier_counts: dict[str, int] = {"flawless": 0, "clean": 0, "guided": 0, "heavy": 0}
+    for s in orchestration_sessions:
+        tier_counts[s.tier] = tier_counts.get(s.tier, 0) + 1
+
+    lines.append(f"  {_c(BOLD, 'Session Breakdown')}")
+    lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
+
+    for tier_name in ["flawless", "clean", "guided", "heavy"]:
+        count = tier_counts[tier_name]
+        frac = count / total_sessions if total_sessions > 0 else 0
+        bar = _bar(frac, tier_name)
+        color = TIER_COLORS[tier_name]
+        label = _c(color, f"{tier_name.capitalize():<10}")
+        pct_str = _c(ACCENT_COLOR, f"{frac * 100:4.0f}%")
+        lines.append(f"  {label} {bar}  {pct_str}  {_c(BOLD, str(count))}")
+
+    lines.append("")
+
+    # --- Activity Heatmap ---
     heatmap = format_heatmap(blocks)
     if heatmap:
         lines.append(heatmap)
 
-    # Top projects
-    if proj_totals:
-        lines.append(f"  {_c(BOLD, 'Top Projects by Active Time')}")
+    # --- Top Projects by Precision ---
+    proj_sessions: dict[str, list[OrchestrationSession]] = {}
+    for s in orchestration_sessions:
+        proj_name = redactor.redact(s.project)
+        proj_sessions.setdefault(proj_name, []).append(s)
+
+    if proj_sessions:
+        lines.append(f"  {_c(BOLD, 'Top Projects by Precision')}")
         lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
 
         sorted_projects = sorted(
-            proj_totals.items(),
-            key=lambda x: sum(x[1].values()),
+            proj_sessions.items(),
+            key=lambda x: sum(s.precision_score for s in x[1]) / len(x[1]),
             reverse=True,
         )
 
-        for proj_name, cats in sorted_projects[:10]:
-            proj_total = sum(cats.values())
-            if proj_total == 0:
-                continue
-            dur = format_duration(proj_total)
-            # Top 2 categories for this project
-            top_cats = sorted(cats.items(), key=lambda x: x[1], reverse=True)[:2]
-            cat_parts = []
-            for c, v in top_cats:
-                color = CATEGORY_COLORS.get(c, "")
-                cat_parts.append(_c(color, f"{c}({v * 100 // proj_total}%)"))
-            cat_str = " ".join(cat_parts)
-            lines.append(f"  {_c(HEADER_COLOR, f'{proj_name:<20}')} {_c(BOLD, f'{dur:>5}')}  {cat_str}")
+        for proj_name, sessions in sorted_projects[:10]:
+            avg = sum(s.precision_score for s in sessions) / len(sessions)
+            tier_l, tier_c = precision_tier_label(avg)
+            count = len(sessions)
+            lines.append(
+                f"  {_c(HEADER_COLOR, f'{proj_name:<20}')} "
+                f"{_c(tier_c + BOLD, f'{avg:.2f}')} "
+                f"{_c(tier_c, f'[{tier_l}]')}"
+                f"  {_c(DIM, f'{count} sessions')}"
+            )
 
         lines.append("")
 
-    # AI Code Generation section (redact project names)
-    if codegen_stats and codegen_stats.ai_lines > 0:
-        redacted_codegen = redactor.redact_dict(codegen_by_project) if codegen_by_project else None
-        lines.append(format_codegen_section(codegen_stats, redacted_codegen))
+    # --- Agent Throughput ---
+    if codegen_stats and (codegen_stats.ai_commits > 0 or codegen_stats.ai_lines > 0):
+        lines.append(f"  {_c(BOLD, 'Agent Throughput')}")
+        lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
+        lines.append(f"  {_c(DIM, 'Commits')}         {_c(BOLD, f'{codegen_stats.ai_commits}')} AI / {codegen_stats.total_commits} total")
+        lines.append(f"  {_c(DIM, 'Files touched')}   {_c(BOLD, str(len(codegen_stats.files_touched)))}")
+        lines.append(f"  {_c(DIM, 'Lines produced')}  {_c(BOLD, f'{codegen_stats.ai_lines:,}')} AI / {codegen_stats.total_lines:,} total")
+        lines.append("")
 
-    # Engineering Efficiency section
-    if efficiency_metrics:
-        redacted_eff = {redactor.redact(k): v for k, v in efficiency_metrics.items()}
-        redacted_qual = {redactor.redact(k): v for k, v in (quality_metrics or {}).items()}
-        lines.append(format_efficiency_section(redacted_eff, redacted_qual))
-
-    # Insights section
-    if insights:
-        from .insights import format_insights
+    # --- Insights ---
+    if insights is not None:
+        from .orchestration_insights import format_orchestration_insights
         lines.append(f"  {_c(BOLD, 'Insights')}")
         lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
-        lines.append(format_insights(insights))
+        lines.append(format_orchestration_insights(insights))
         lines.append("")
 
     return "\n".join(lines)

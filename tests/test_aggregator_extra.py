@@ -6,8 +6,6 @@ from claude_analytics.models import Message, Session, ActivityBlock
 from claude_analytics.aggregator import (
     calculate_active_time,
     build_activity_blocks,
-    aggregate_by_category,
-    aggregate_by_project,
     _finalize_block,
     IDLE_THRESHOLD_SECONDS,
 )
@@ -74,7 +72,7 @@ class TestCalculateActiveTime:
         """Gap >= IDLE_THRESHOLD_SECONDS should not be counted."""
         msgs = [
             _msg("user", "a", _offset(0)),
-            _msg("user", "b", _offset(IDLE_THRESHOLD_SECONDS)),  # exactly threshold — excluded
+            _msg("user", "b", _offset(IDLE_THRESHOLD_SECONDS)),  # exactly threshold -- excluded
         ]
         result = calculate_active_time(msgs)
         assert result == 0
@@ -101,7 +99,7 @@ class TestCalculateActiveTime:
         msgs = [
             _msg("user", "a", _ts(10, 0, 0)),
             _msg("user", "b", _ts(10, 0, 30)),   # +30s active
-            _msg("user", "c", _ts(10, 20, 0)),   # +20min idle — excluded
+            _msg("user", "c", _ts(10, 20, 0)),   # +20min idle -- excluded
             _msg("user", "d", _ts(10, 20, 30)),  # +30s active
         ]
         result = calculate_active_time(msgs)
@@ -126,29 +124,26 @@ class TestBuildActivityBlocks:
         assert build_activity_blocks(session) == []
 
     def test_no_user_messages_returns_empty(self):
-        """A session with only assistant messages produces no blocks (no user interactions)."""
+        """A session with only assistant messages produces no blocks."""
         messages = [
             _msg("assistant", "Hello", _ts(10, 0)),
             _msg("assistant", "Done", _ts(10, 5)),
         ]
         session = _session(messages)
         result = build_activity_blocks(session)
-        # No user messages → classify_session returns empty → no blocks
         assert result == []
 
     def test_single_user_message_makes_one_block(self):
-        """Single user message (no assistant following) → 1 block."""
         messages = [
             _msg("user", "implement login", _ts(10, 0)),
         ]
         session = _session(messages)
-        # Won't be a valid session (< 2 user msgs), but build_activity_blocks
-        # works on the raw message list — it gets called post-parse
         result = build_activity_blocks(session)
         assert len(result) == 1
+        assert result[0].category == "session"
 
     def test_no_idle_gap_one_block(self):
-        """Two interactions within threshold → should be 1 block."""
+        """Two user messages within threshold -> should be 1 block."""
         messages = [
             _msg("user", "implement login", _ts(10, 0)),
             _msg("assistant", "Done", _ts(10, 0, 5), ["Write"]),
@@ -158,9 +153,10 @@ class TestBuildActivityBlocks:
         session = _session(messages)
         blocks = build_activity_blocks(session)
         assert len(blocks) == 1
+        assert blocks[0].category == "session"
 
     def test_idle_gap_creates_separate_blocks(self):
-        """A gap >= IDLE_THRESHOLD_SECONDS between interactions → 2 blocks."""
+        """A gap >= IDLE_THRESHOLD_SECONDS between user messages -> 2 blocks."""
         idle_gap_minutes = (IDLE_THRESHOLD_SECONDS // 60) + 1
         messages = [
             _msg("user", "implement login", _ts(10, 0)),
@@ -190,8 +186,8 @@ class TestBuildActivityBlocks:
         blocks = build_activity_blocks(session)
         assert blocks[0].start_time == _ts(10, 0)
 
-    def test_dominant_category_assigned(self):
-        """With 2 coding and 1 debug user message, the block should be 'coding'."""
+    def test_all_blocks_have_session_category(self):
+        """All blocks should have category 'session'."""
         messages = [
             _msg("user", "implement login", _ts(10, 0)),
             _msg("assistant", "Done", _ts(10, 0, 5), ["Write"]),
@@ -202,10 +198,7 @@ class TestBuildActivityBlocks:
         ]
         session = _session(messages)
         blocks = build_activity_blocks(session)
-        # Both interactions are user messages — coding has 2, debug has 1
-        assert len(blocks) == 1
-        # The dominant category should be coding (2 vs 1)
-        assert blocks[0].category == "coding"
+        assert all(b.category == "session" for b in blocks)
 
     def test_block_message_count(self):
         messages = [
@@ -216,15 +209,10 @@ class TestBuildActivityBlocks:
         ]
         session = _session(messages)
         blocks = build_activity_blocks(session)
-        # message_count is total messages in the block (user + assistant)
+        # message_count is user messages in the block
         assert blocks[0].message_count >= 2
 
     def test_tool_uses_aggregated_in_block(self):
-        # _finalize_block reads tool_uses from the Message objects in its list,
-        # which are the user messages as returned by classify_session.
-        # classify_interaction merges assistant tools into a synthetic user message,
-        # but build_activity_blocks stores the ORIGINAL user message objects.
-        # So tool_uses in blocks come from the original user message's tool_uses field.
         messages = [
             _msg("user", "code task", _ts(10, 0), tools=["Write"]),
             _msg("assistant", "done", _ts(10, 0, 5)),
@@ -244,25 +232,15 @@ class TestBuildActivityBlocks:
 class TestFinalizeBlock:
     def test_single_message_block(self):
         msg = _msg("user", "implement feature", _ts(10, 0))
-        classified = [(msg, "coding")]
-        block = _finalize_block(classified, "my-project")
-        assert block.category == "coding"
+        block = _finalize_block([msg], "my-project")
+        assert block.category == "session"
         assert block.project == "my-project"
         assert block.message_count == 1
 
-    def test_dominant_category_by_count(self):
-        msgs = [
-            (_msg("user", "a", _ts(10, 0)), "coding"),
-            (_msg("user", "b", _ts(10, 3)), "coding"),
-            (_msg("user", "c", _ts(10, 6)), "debug"),
-        ]
-        block = _finalize_block(msgs, "proj")
-        assert block.category == "coding"
-
     def test_tool_uses_deduplicated(self):
         msgs = [
-            (_msg("user", "a", _ts(10, 0), ["Write", "Read"]), "coding"),
-            (_msg("user", "b", _ts(10, 3), ["Write", "Edit"]), "coding"),
+            _msg("user", "a", _ts(10, 0), ["Write", "Read"]),
+            _msg("user", "b", _ts(10, 3), ["Write", "Edit"]),
         ]
         block = _finalize_block(msgs, "proj")
         assert block.tool_uses.count("Write") == 1
@@ -271,105 +249,16 @@ class TestFinalizeBlock:
         t1 = _ts(10, 0)
         t2 = _ts(10, 5)
         msgs = [
-            (_msg("user", "a", t1), "coding"),
-            (_msg("user", "b", t2), "coding"),
+            _msg("user", "a", t1),
+            _msg("user", "b", t2),
         ]
         block = _finalize_block(msgs, "proj")
         assert block.start_time == t1
 
     def test_duration_calculated(self):
         msgs = [
-            (_msg("user", "a", _ts(10, 0, 0)), "coding"),
-            (_msg("user", "b", _ts(10, 0, 30)), "coding"),
+            _msg("user", "a", _ts(10, 0, 0)),
+            _msg("user", "b", _ts(10, 0, 30)),
         ]
         block = _finalize_block(msgs, "proj")
         assert block.duration_seconds == 30
-
-
-# ---------------------------------------------------------------------------
-# aggregate_by_category
-# ---------------------------------------------------------------------------
-
-class TestAggregateByCategoryExtra:
-    def test_empty_blocks(self):
-        result = aggregate_by_category([])
-        assert result == {}
-
-    def test_single_block(self):
-        block = ActivityBlock(
-            category="coding",
-            start_time=_ts(10, 0),
-            duration_seconds=3600,
-            message_count=2,
-        )
-        result = aggregate_by_category([block])
-        assert result == {"coding": 3600}
-
-    def test_multiple_same_category(self):
-        blocks = [
-            ActivityBlock("coding", _ts(10, 0), 1800, 2),
-            ActivityBlock("coding", _ts(11, 0), 900, 1),
-        ]
-        result = aggregate_by_category(blocks)
-        assert result == {"coding": 2700}
-
-    def test_multiple_categories(self):
-        blocks = [
-            ActivityBlock("coding", _ts(10, 0), 1800, 2),
-            ActivityBlock("debug", _ts(11, 0), 900, 1),
-        ]
-        result = aggregate_by_category(blocks)
-        assert result["coding"] == 1800
-        assert result["debug"] == 900
-
-    def test_zero_duration_included(self):
-        block = ActivityBlock("coding", _ts(10, 0), 0, 1)
-        result = aggregate_by_category([block])
-        assert result["coding"] == 0
-
-
-# ---------------------------------------------------------------------------
-# aggregate_by_project
-# ---------------------------------------------------------------------------
-
-class TestAggregateByProjectExtra:
-    def test_empty_blocks(self):
-        result = aggregate_by_project([])
-        assert result == {}
-
-    def test_single_project_single_category(self):
-        block = ActivityBlock("coding", _ts(10, 0), 1800, 2, project="proj-a")
-        result = aggregate_by_project([block])
-        assert "proj-a" in result
-        assert result["proj-a"]["coding"] == 1800
-
-    def test_multiple_projects(self):
-        blocks = [
-            ActivityBlock("coding", _ts(10, 0), 1800, 2, project="proj-a"),
-            ActivityBlock("debug", _ts(11, 0), 900, 1, project="proj-b"),
-        ]
-        result = aggregate_by_project(blocks)
-        assert "proj-a" in result
-        assert "proj-b" in result
-
-    def test_same_project_different_categories(self):
-        blocks = [
-            ActivityBlock("coding", _ts(10, 0), 1800, 2, project="proj-a"),
-            ActivityBlock("debug", _ts(11, 0), 600, 1, project="proj-a"),
-        ]
-        result = aggregate_by_project(blocks)
-        assert result["proj-a"]["coding"] == 1800
-        assert result["proj-a"]["debug"] == 600
-
-    def test_same_project_same_category_accumulated(self):
-        blocks = [
-            ActivityBlock("coding", _ts(10, 0), 1000, 2, project="proj-a"),
-            ActivityBlock("coding", _ts(11, 0), 500, 1, project="proj-a"),
-        ]
-        result = aggregate_by_project(blocks)
-        assert result["proj-a"]["coding"] == 1500
-
-    def test_empty_project_name_handled(self):
-        block = ActivityBlock("coding", _ts(10, 0), 600, 1, project="")
-        result = aggregate_by_project([block])
-        assert "" in result

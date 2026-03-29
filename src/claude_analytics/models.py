@@ -28,3 +28,18 @@ class ActivityBlock:
     message_count: int
     tool_uses: list[str] = field(default_factory=list)
     project: str = ""
+
+
+@dataclass
+class OrchestrationSession:
+    session_id: str
+    project: str
+    total_duration: int  # wall-clock seconds
+    intent_length: int  # chars in initial prompt
+    steering_count: int
+    precision_score: float  # 1 / (1 + steering_count)
+    tier: str  # "flawless" | "clean" | "guided" | "heavy"
+    has_outcome: bool  # did session produce commits?
+    phase_sequence: list[str] = field(default_factory=list)
+    message_count: int = 0
+    time_to_first_commit: int | None = None
