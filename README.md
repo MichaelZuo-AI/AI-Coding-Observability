@@ -1,43 +1,58 @@
 # Claude Code Analytics
 
-A local-first CLI tool that parses Claude Code session logs to analyze how engineers spend their AI-assisted development time — coding, debugging, design, devops, and more.
+A local-first CLI tool that measures how effectively you orchestrate AI coding agents. Parses Claude Code session logs and scores each session by **orchestration precision** — how many corrections you needed after stating your initial intent.
 
 ```
 ══════════════════════════════════════════════════
   Claude Code Analytics
-  2026-02-07 ~ 2026-03-05
+  2026-02-26 ~ 2026-03-29
   Engineer: michaelzuo
+  Streak: 32d current  32d longest
 ══════════════════════════════════════════════════
 
-  Active Time Breakdown
+  Orchestration Precision
   ──────────────────────────────────────────────
-  coding     █░░░░░░░░░░░░░░░░░░░   10%     4h
-  debug      ░░░░░░░░░░░░░░░░░░░░    1%    32m
-  design     ░░░░░░░░░░░░░░░░░░░░    3%     1h
-  devops     ███░░░░░░░░░░░░░░░░░   16%     6h
-  review     ░░░░░░░░░░░░░░░░░░░░    3%     1h
-  data       ████░░░░░░░░░░░░░░░░   24%     9h
-  chat       ████████░░░░░░░░░░░░   43%    17h
-  ──────────────────────────────────────────────
-  Total Active                       100%    39h
+  Score       ████████░░░░░░░░░░░░  0.43 [Guided]
+  Zero-touch   17% (24/139 sessions)
+  Sessions     139
 
-  AI Code Generation
+  Session Breakdown
   ──────────────────────────────────────────────
-  AI-generated  ████████████░░░░░░░░  61%
-    58,983 AI lines / 96,867 total lines
+  Flawless   ███░░░░░░░░░░░░░░░░░    17%  24
+  Clean      ██████░░░░░░░░░░░░░░    30%  42
+  Guided     ████░░░░░░░░░░░░░░░░    22%  31
+  Heavy      ██████░░░░░░░░░░░░░░    30%  42
+
+  Activity Heatmap
   ──────────────────────────────────────────────
-  AI commits          229
-  Total commits       241
-  Files touched       3257
+  Mo ░█▓▓▓
+  Tu ░▒█▒▒
+  We ░▒▓▓▒
+  Th ▒█▓▒▒
+  Fr ▒█▓█▒
+  Sa ▓█▓▒▓
+  Su ██▓██
+
+  Agent Throughput
+  ──────────────────────────────────────────────
+  Commits         806 AI / 874 total
+  Files touched   768
+  Lines produced  149,647 AI / 389,874 total
 ```
 
 ## How It Works
 
 1. **Parses** `~/.claude/projects/**/*.jsonl` session logs (read-only, never modified)
-2. **Classifies** each interaction by intent using regex patterns + tool-use signals
-3. **Calculates** active time with idle gap detection (10-min threshold)
-4. **Measures** AI code generation by matching git commits to session time windows
-5. **Reports** per-category and per-project breakdowns with colored terminal output
+2. **Classifies** each user message as `intent`, `steering`, `clarification`, or `acknowledgment`
+3. **Scores** each session: `precision = 1 / (1 + steering_count)` — fewer corrections = higher score
+4. **Tiers** sessions: Flawless (1.0), Clean (0.50+), Guided (0.25+), Heavy (<0.25)
+5. **Reports** per-project precision, activity heatmap, agent throughput, and actionable insights
+
+## The Idea
+
+If you direct AI agents rather than code yourself, the question isn't "how much did AI help me code" — it's **"how precisely did I translate intent into shipped code?"**
+
+A session where you say "build X" and the AI delivers with zero corrections scores 1.0 (Flawless). A session where you correct the AI 4 times scores 0.2 (Heavy). Over time, your precision score tells you whether your prompts are getting better.
 
 ## Install
 
@@ -59,7 +74,7 @@ To upgrade: `pipx install --force "git+https://github.com/MichaelZuo-AI/AI-Codin
 ## Usage
 
 ```bash
-# Full activity report
+# Full orchestration report
 claude-analytics report
 
 # Filter by date range
@@ -71,26 +86,20 @@ claude-analytics report --project MewtwoAI
 # List recent sessions
 claude-analytics sessions
 claude-analytics sessions --limit 10
-
-# Use LLM reclassification for low-confidence interactions (uses your Claude Code subscription)
-claude-analytics report --llm
-
-# Launch interactive dashboard
-claude-analytics dashboard
-claude-analytics dashboard --port 8080
 ```
 
-## Classification Categories
+## Message Classification
 
-| Category | Signal |
-|----------|--------|
-| **coding** | implement, create, refactor, UI components + Edit/Write tool use |
-| **debug** | fix, error, crash, "still not work" + Bash/Grep tool use |
-| **design** | architecture, plan, "how should", tradeoffs |
-| **devops** | deploy, commit, push, install, setup, CI/CD |
-| **review** | explain, "show me", "how to use", "walk me through" |
-| **data** | stock analysis, portfolio, financial, images, email |
-| **chat** | short replies (yes/ok/go ahead), greetings, slash commands |
+Each user message after the initial prompt is classified:
+
+| Role | Detection | Examples |
+|------|-----------|---------|
+| **intent** | First message, or first after idle gap (>10 min) | "Build a login page with OAuth" |
+| **steering** | Negation, correction, rejection patterns | "No, use Postgres not SQLite", "Revert that" |
+| **clarification** | Response to AI's question | AI: "Which DB?" → User: "Postgres" |
+| **acknowledgment** | Default — approval or continuation | "yes", "looks good", "go ahead" |
+
+Only `steering` messages count against your precision score. Clarifications and acknowledgments are neutral.
 
 ## Privacy
 
@@ -102,44 +111,5 @@ claude-analytics dashboard --port 8080
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/ -v   # 87 tests
+pytest tests/ -v   # 247 tests
 ```
-
-## Changelog
-
-### v0.4.0
-- **Phase 2**: `claude -p` reclassification for low-confidence interactions (`--llm` flag)
-- SQLite cache at `~/.claude-analytics/classification_cache.db` — each interaction classified only once
-- Confidence scoring on rule-based classifier (threshold: 1.5)
-- **Phase 3**: Interactive React + Recharts dashboard (`claude-analytics dashboard`)
-- Dark-themed dashboard with pie charts, stacked area charts, bar charts
-- Daily activity time series, per-project breakdowns, AI code generation stats
-- 87 tests
-
-### v0.3.1
-- Fixed ZeroDivisionError when a project has zero active time (#1)
-- Added progress indicators for large `~/.claude` directories (#1)
-
-### v0.3.0
-- Improved classifier: replaced 75% "other" with specific **data** and **chat** categories
-- Added patterns for financial terms, image shares, short replies, slash commands
-- Better coding/devops/review detection (commit, push, install, "show me", "how to use")
-- 63 tests
-
-### v0.2.0
-- Git-based AI code generation tracking (replaces Write/Edit counting)
-- Matches git commit timestamps to Claude Code session time windows
-- Captures all AI code including Bash scaffolding (npx create-next-app, etc.)
-- Shows AI% per project with progress bars
-
-### v0.1.0
-- Initial release: JSONL parser, rule-based classifier, time aggregator
-- Colored CLI report with per-category and per-project breakdowns
-- Write/Edit tool-based AI line counting
-
-## Roadmap
-
-- [x] **Phase 1** — Parser + rule-based classifier + colored CLI report
-- [x] **Phase 1.5** — AI code generation metrics (git-based, per-project AI%)
-- [x] **Phase 2** — `claude -p` fallback for low-confidence classification + SQLite cache
-- [x] **Phase 3** — React + Recharts dashboard
