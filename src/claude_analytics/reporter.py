@@ -2,7 +2,7 @@
 
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from .models import ActivityBlock
 from .codegen import CodeGenStats
 from .privacy import ProjectRedactor
@@ -62,6 +62,31 @@ def _bar(fraction: float, category: str, width: int = BAR_WIDTH) -> str:
     if _use_color():
         return f"{color}{bar_filled}{RESET}{DIM}{bar_empty}{RESET}"
     return bar_filled + bar_empty
+
+
+def compute_streaks(blocks: list[ActivityBlock]) -> tuple[int, int]:
+    """Compute current and longest consecutive-day streaks from activity blocks.
+
+    Returns (current_streak, longest_streak) in days.
+    """
+    if not blocks:
+        return 0, 0
+
+    active_dates = sorted({b.start_time.date() for b in blocks})
+    if not active_dates:
+        return 0, 0
+
+    longest = 1
+    current = 1
+    for i in range(1, len(active_dates)):
+        if active_dates[i] - active_dates[i - 1] == timedelta(days=1):
+            current += 1
+            longest = max(longest, current)
+        else:
+            current = 1
+
+    # current streak = streak ending on the most recent active date
+    return current, longest
 
 
 def format_codegen_section(
@@ -223,6 +248,12 @@ def print_report(
     lines.append(f"  {_c(HEADER_COLOR + BOLD, 'Claude Code Analytics')}")
     lines.append(f"  {_c(ACCENT_COLOR, earliest.strftime('%Y-%m-%d'))} ~ {_c(ACCENT_COLOR, latest.strftime('%Y-%m-%d'))}")
     lines.append(f"  Engineer: {_c(HEADER_COLOR, user)}")
+
+    current_streak, longest_streak = compute_streaks(blocks)
+    if longest_streak > 0:
+        streak_icon = "\U0001f525" if _use_color() else "*"
+        lines.append(f"  Streak: {_c(ACCENT_COLOR, f'{current_streak}d')} current  {_c(DIM, f'{longest_streak}d longest')}")
+
     lines.append(_c(LINE_COLOR, "\u2550" * 50))
     lines.append("")
 
