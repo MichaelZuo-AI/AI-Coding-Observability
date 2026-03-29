@@ -2,6 +2,7 @@
 
 import os
 import sys
+from collections import defaultdict
 from datetime import datetime, timedelta
 from .models import ActivityBlock
 from .codegen import CodeGenStats
@@ -104,6 +105,87 @@ def compute_streaks(blocks: list[ActivityBlock]) -> tuple[int, int]:
 
     # current streak = streak ending on the most recent active date
     return current, longest
+
+
+HEATMAP_CHARS = ["\u2591", "\u2592", "\u2593", "\u2588"]  # light to heavy
+HEATMAP_COLORS = [
+    "\033[38;5;236m",  # very dim (no activity)
+    "\033[38;5;107m",  # light green
+    "\033[38;5;71m",   # medium green
+    "\033[38;5;40m",   # bright green
+]
+DAY_LABELS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+
+
+def format_heatmap(blocks: list[ActivityBlock], max_weeks: int = 20) -> str:
+    """Render a GitHub-style ASCII contribution heatmap from activity blocks.
+
+    Shows a 7-row (Mon-Sun) x N-week grid using Unicode block characters
+    at varying intensities based on daily active seconds.
+    """
+    if not blocks:
+        return ""
+
+    # Aggregate seconds per date
+    daily: dict[datetime, int] = defaultdict(int)
+    for b in blocks:
+        daily[b.start_time.date()] += b.duration_seconds
+
+    if not daily:
+        return ""
+
+    # Determine date range
+    min_date = min(daily.keys())
+    max_date = max(daily.keys())
+
+    # Align to Monday start
+    start = min_date - timedelta(days=min_date.weekday())
+    end = max_date + timedelta(days=6 - max_date.weekday())
+
+    # Limit to max_weeks
+    total_days = (end - start).days + 1
+    total_weeks = total_days // 7
+    if total_weeks > max_weeks:
+        start = end - timedelta(days=max_weeks * 7 - 1)
+        start = start - timedelta(days=start.weekday())
+
+    # Compute intensity thresholds from actual data
+    values = [v for v in daily.values() if v > 0]
+    if not values:
+        return ""
+    p33 = sorted(values)[len(values) // 3]
+    p66 = sorted(values)[2 * len(values) // 3]
+
+    def intensity(secs: int) -> int:
+        if secs <= 0:
+            return 0
+        if secs <= p33:
+            return 1
+        if secs <= p66:
+            return 2
+        return 3
+
+    lines: list[str] = []
+    lines.append(f"  {_c(BOLD, 'Activity Heatmap')}")
+    lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
+
+    for dow in range(7):
+        row_chars: list[str] = []
+        day = start + timedelta(days=dow)
+        while day <= end:
+            secs = daily.get(day, 0)
+            level = intensity(secs)
+            char = HEATMAP_CHARS[level]
+            if _use_color():
+                row_chars.append(f"{HEATMAP_COLORS[level]}{char}{RESET}")
+            else:
+                row_chars.append(char)
+            day += timedelta(days=7)
+        label = _c(DIM, f"{DAY_LABELS[dow]}")
+        lines.append(f"  {label} {''.join(row_chars)}")
+
+    lines.append("")
+    return "\n".join(lines)
 
 
 def format_codegen_section(
@@ -298,6 +380,11 @@ def print_report(
     total_dur = _c(BOLD + ACCENT_COLOR, format_duration(total_seconds))
     lines.append(f"  {total_label:<34}  {_c(ACCENT_COLOR, '100%')}  {total_dur:>5}")
     lines.append("")
+
+    # Activity heatmap
+    heatmap = format_heatmap(blocks)
+    if heatmap:
+        lines.append(heatmap)
 
     # Top projects
     if proj_totals:
