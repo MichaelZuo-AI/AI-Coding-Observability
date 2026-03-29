@@ -2,43 +2,7 @@
 
 A local-first CLI tool that measures how effectively you orchestrate AI coding agents. Parses Claude Code session logs and scores each session by **orchestration precision** — how many corrections you needed after stating your initial intent.
 
-```
-══════════════════════════════════════════════════
-  Claude Code Analytics
-  2026-02-26 ~ 2026-03-29
-  Engineer: michaelzuo
-  Streak: 32d current  32d longest
-══════════════════════════════════════════════════
-
-  Orchestration Precision
-  ──────────────────────────────────────────────
-  Score       ████████░░░░░░░░░░░░  0.43 [Guided]
-  Zero-touch   17% (24/139 sessions)
-  Sessions     139
-
-  Session Breakdown
-  ──────────────────────────────────────────────
-  Flawless   ███░░░░░░░░░░░░░░░░░    17%  24
-  Clean      ██████░░░░░░░░░░░░░░    30%  42
-  Guided     ████░░░░░░░░░░░░░░░░    22%  31
-  Heavy      ██████░░░░░░░░░░░░░░    30%  42
-
-  Activity Heatmap
-  ──────────────────────────────────────────────
-  Mo ░█▓▓▓
-  Tu ░▒█▒▒
-  We ░▒▓▓▒
-  Th ▒█▓▒▒
-  Fr ▒█▓█▒
-  Sa ▓█▓▒▓
-  Su ██▓██
-
-  Agent Throughput
-  ──────────────────────────────────────────────
-  Commits         806 AI / 874 total
-  Files touched   768
-  Lines produced  149,647 AI / 389,874 total
-```
+![Claude Code Analytics Dashboard](docs/dashboard.png)
 
 ## How It Works
 
