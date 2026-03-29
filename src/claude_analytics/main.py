@@ -5,15 +5,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import json as json_module
-
 from .parser import parse_all_sessions, CLAUDE_PROJECTS_DIR
-from .aggregator import build_activity_blocks, aggregate_by_category, aggregate_by_project
-from .codegen import analyze_codegen, analyze_codegen_by_project, extract_project_dirs
-from .classifier import classify_session
-from .efficiency import compute_efficiency, EfficiencyMetrics
-from .quality import compute_quality, QualityMetrics
-from .insights import generate_insights, format_insights
+from .aggregator import build_activity_blocks
+from .codegen import analyze_codegen
+from .orchestration import analyze_session
+from .orchestration_insights import generate_orchestration_insights
 from .reporter import print_report
 from .privacy import ProjectRedactor
 
@@ -42,60 +38,6 @@ def parse_date(s: str) -> datetime:
     """Parse a date string like '2026-02-01' into a timezone-aware datetime."""
     dt = datetime.strptime(s, "%Y-%m-%d")
     return dt.replace(tzinfo=timezone.utc)
-
-
-def _compute_metrics(
-    all_blocks: list,
-    sessions: list,
-    projects_dir: Path,
-    use_llm: bool = False,
-) -> tuple[dict[str, EfficiencyMetrics], dict[str, QualityMetrics], dict[str, list]]:
-    """Compute efficiency and quality metrics per project.
-
-    Returns (efficiency_metrics, quality_metrics, proj_classified).
-    """
-    project_dirs = extract_project_dirs(projects_dir)
-
-    proj_blocks: dict[str, list] = {}
-    proj_msg_counts: dict[str, int] = {}
-    proj_active_hours: dict[str, float] = {}
-    proj_classified: dict[str, list] = {}
-
-    for block in all_blocks:
-        proj_blocks.setdefault(block.project, []).append(block)
-
-    for session in sessions:
-        user_msgs = [m for m in session.messages if m.role == "user"]
-        proj_msg_counts[session.project] = proj_msg_counts.get(session.project, 0) + len(user_msgs)
-        proj_active_hours[session.project] = proj_active_hours.get(session.project, 0) + session.active_seconds / 3600
-        classified = classify_session(session.messages, use_llm=use_llm)
-        proj_classified.setdefault(session.project, []).extend(classified)
-
-    proj_sessions: dict[str, list] = {}
-    for session in sessions:
-        proj_sessions.setdefault(session.project, []).append(session)
-
-    efficiency_metrics: dict[str, EfficiencyMetrics] = {}
-    quality_metrics: dict[str, QualityMetrics] = {}
-    for proj, blocks_list in proj_blocks.items():
-        git_root = str(project_dirs.get(proj, "")) if proj in project_dirs else None
-        qual = compute_quality(
-            blocks_list,
-            proj_sessions.get(proj, []),
-            classified_messages=proj_classified.get(proj),
-            git_root=git_root,
-            session_count=len(proj_sessions.get(proj, [])),
-        )
-        quality_metrics[proj] = qual
-        eff = compute_efficiency(
-            blocks_list,
-            proj_msg_counts.get(proj, 0),
-            proj_active_hours.get(proj, 0),
-            task_resolution_efficiency=qual.task_resolution_efficiency,
-        )
-        efficiency_metrics[proj] = eff
-
-    return efficiency_metrics, quality_metrics, proj_classified
 
 
 def cmd_report(args: argparse.Namespace) -> None:
@@ -127,196 +69,36 @@ def cmd_report(args: argparse.Namespace) -> None:
         print("No sessions found for the specified date range.")
         return
 
-    use_llm = getattr(args, "llm", False)
-    _progress(f"Classifying {len(sessions)} sessions")
+    # Build activity blocks (for heatmap/streaks)
+    _progress(f"Building blocks for {len(sessions)} sessions")
     all_blocks = []
     for session in sessions:
-        blocks = build_activity_blocks(session, use_llm=use_llm)
+        blocks = build_activity_blocks(session)
         all_blocks.extend(blocks)
 
+    # Analyze orchestration
+    _progress("Analyzing orchestration")
+    orchestration_sessions = [analyze_session(s) for s in sessions]
+
+    # Codegen stats
     codegen_stats = analyze_codegen(
         projects_dir,
         project_filter=args.project,
         sessions=sessions,
         on_progress=lambda done, total: _progress("Analyzing git repos", done, total),
     )
-    codegen_by_project = analyze_codegen_by_project(projects_dir, sessions=sessions) if not args.project else None
 
-    _progress("Computing efficiency metrics")
-    efficiency_metrics, quality_metrics, _ = _compute_metrics(all_blocks, sessions, projects_dir, use_llm)
-    insights_list = generate_insights(efficiency_metrics, quality_metrics, all_blocks, sessions)
+    # Generate insights
+    insights_list = generate_orchestration_insights(orchestration_sessions)
 
     _progress_done()
     report = print_report(
-        all_blocks, from_date, to_date, codegen_stats, codegen_by_project,
-        efficiency_metrics=efficiency_metrics,
-        quality_metrics=quality_metrics,
+        orchestration_sessions=orchestration_sessions,
+        blocks=all_blocks,
+        codegen_stats=codegen_stats,
         insights=insights_list,
     )
     print(report)
-
-
-def _collect_data(args: argparse.Namespace) -> dict:
-    """Collect analytics data and return as a JSON-serializable dict."""
-    projects_dir = Path(args.projects_dir) if args.projects_dir else CLAUDE_PROJECTS_DIR
-
-    sessions = parse_all_sessions(
-        projects_dir,
-        project_filter=getattr(args, "project", None),
-        on_progress=lambda done, total: _progress("Parsing sessions", done, total),
-    )
-
-    if not sessions:
-        _progress_done()
-        return {}
-
-    from_date = parse_date(args.from_date) if args.from_date else None
-    to_date = parse_date(args.to_date) if args.to_date else None
-
-    if from_date:
-        sessions = [s for s in sessions if s.end_time and s.end_time >= from_date]
-    if to_date:
-        sessions = [s for s in sessions if s.start_time and s.start_time <= to_date]
-
-    if not sessions:
-        _progress_done()
-        return {}
-
-    use_llm = getattr(args, "llm", False)
-    all_blocks = []
-    for session in sessions:
-        blocks = build_activity_blocks(session, use_llm=use_llm)
-        all_blocks.extend(blocks)
-
-    cat_totals = aggregate_by_category(all_blocks)
-    proj_totals = aggregate_by_project(all_blocks)
-
-    codegen_stats = analyze_codegen(
-        projects_dir,
-        project_filter=getattr(args, "project", None),
-        sessions=sessions,
-        on_progress=lambda done, total: _progress("Analyzing git repos", done, total),
-    )
-    codegen_by_project = analyze_codegen_by_project(projects_dir, sessions=sessions)
-
-    efficiency_data, quality_data, _ = _compute_metrics(all_blocks, sessions, projects_dir, use_llm)
-
-    _progress_done()
-
-    # PII redaction
-    redactor = ProjectRedactor()
-
-    earliest = min(b.start_time for b in all_blocks) if all_blocks else None
-    latest = max(b.start_time for b in all_blocks) if all_blocks else None
-
-    # Build daily time series
-    daily: dict[str, dict[str, int]] = {}
-    for block in all_blocks:
-        day = block.start_time.strftime("%Y-%m-%d")
-        if day not in daily:
-            daily[day] = {}
-        daily[day][block.category] = daily[day].get(block.category, 0) + block.duration_seconds
-
-    daily_series = [
-        {"date": day, **{cat: secs for cat, secs in cats.items()}}
-        for day, cats in sorted(daily.items())
-    ]
-
-    return {
-        "dateRange": {
-            "from": earliest.isoformat() if earliest else None,
-            "to": latest.isoformat() if latest else None,
-        },
-        "categoryTotals": cat_totals,
-        "projectTotals": redactor.redact_dict(proj_totals),
-        "dailySeries": daily_series,
-        "codegen": {
-            "aiLines": codegen_stats.ai_lines,
-            "totalLines": codegen_stats.total_lines,
-            "aiPercentage": round(codegen_stats.ai_percentage, 1),
-            "aiCommits": codegen_stats.ai_commits,
-            "totalCommits": codegen_stats.total_commits,
-            "filesTouched": len(codegen_stats.files_touched),
-        },
-        "codegenByProject": {
-            redactor.redact(proj): {
-                "aiLines": s.ai_lines,
-                "totalLines": s.total_lines,
-                "aiPercentage": round(s.ai_percentage, 1),
-            }
-            for proj, s in (codegen_by_project or {}).items()
-            if s.ai_lines > 0
-        },
-        "efficiency": {
-            redactor.redact(proj): {
-                "focusRatio": round(eff.focus_ratio, 3),
-                "efficiencyScore": round(eff.efficiency_score, 3),
-                "debugTax": round(eff.debug_tax, 3),
-                "interactionDensity": round(eff.interaction_density, 1),
-                "chatDevopsOverhead": round(eff.chat_devops_overhead, 3),
-                "designSeconds": eff.design_seconds,
-                "codingSeconds": eff.coding_seconds,
-                "deploymentSeconds": eff.deployment_seconds,
-            }
-            for proj, eff in efficiency_data.items()
-        },
-        "quality": {
-            redactor.redact(proj): {
-                "taskResolutionEfficiency": round(qual.task_resolution_efficiency, 3),
-                "reworkRate": round(qual.rework_rate, 3),
-                "oneShotSuccessRate": round(qual.one_shot_success_rate, 3),
-                "debugLoopMaxDepth": qual.debug_loop_max_depth,
-                "debugLoopAvgDepth": round(qual.debug_loop_avg_depth, 1),
-                "contextSwitchFrequency": round(qual.context_switch_frequency, 2),
-            }
-            for proj, qual in quality_data.items()
-        },
-    }
-
-
-def cmd_dashboard(args: argparse.Namespace) -> None:
-    _progress("Collecting data")
-    data = _collect_data(args)
-
-    if not data:
-        print("No data found.")
-        return
-
-    import shutil
-    import tempfile
-    import http.server
-    import webbrowser
-    import functools
-
-    # Serve from a temp directory to avoid writing into the installed package
-    serve_dir = Path(tempfile.mkdtemp(prefix="claude-analytics-"))
-    shutil.copy(Path(__file__).parent / "dashboard" / "index.html", serve_dir)
-    data_path = serve_dir / "data.json"
-
-    with open(data_path, "w") as f:
-        json_module.dump(data, f, indent=2)
-
-    port = args.port
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(serve_dir))
-
-    try:
-        server = http.server.HTTPServer(("localhost", port), handler)
-    except OSError:
-        print(f"Port {port} is in use. Try --port <other>", file=sys.stderr)
-        sys.exit(1)
-
-    url = f"http://localhost:{port}"
-    print(f"Dashboard running at {url}")
-    print("Press Ctrl+C to stop.")
-    webbrowser.open(url)
-
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nStopped.")
-        server.server_close()
-    finally:
-        shutil.rmtree(serve_dir, ignore_errors=True)
 
 
 def cmd_sessions(args: argparse.Namespace) -> None:
@@ -346,59 +128,6 @@ def cmd_sessions(args: argparse.Namespace) -> None:
         print(f"  {start}  {proj:<25} {user_msgs:>3} msgs  {session.session_id[:8]}")
 
 
-def cmd_insights(args: argparse.Namespace) -> None:
-    projects_dir = Path(args.projects_dir) if args.projects_dir else CLAUDE_PROJECTS_DIR
-
-    _progress("Discovering sessions")
-    sessions = parse_all_sessions(
-        projects_dir,
-        project_filter=args.project,
-        on_progress=lambda done, total: _progress("Parsing sessions", done, total),
-    )
-
-    if not sessions:
-        _progress_done()
-        print("No sessions found.")
-        return
-
-    from_date = parse_date(args.from_date) if args.from_date else None
-    to_date = parse_date(args.to_date) if args.to_date else None
-
-    if from_date:
-        sessions = [s for s in sessions if s.end_time and s.end_time >= from_date]
-    if to_date:
-        sessions = [s for s in sessions if s.start_time and s.start_time <= to_date]
-
-    if not sessions:
-        _progress_done()
-        print("No sessions found for the specified date range.")
-        return
-
-    use_llm = getattr(args, "llm", False)
-    _progress(f"Classifying {len(sessions)} sessions")
-    all_blocks = []
-    for session in sessions:
-        blocks = build_activity_blocks(session, use_llm=use_llm)
-        all_blocks.extend(blocks)
-
-    _progress("Computing efficiency metrics")
-    efficiency_metrics, quality_metrics, _ = _compute_metrics(all_blocks, sessions, projects_dir, use_llm)
-
-    # PII redaction
-    redactor = ProjectRedactor()
-    redacted_eff = {redactor.redact(k): v for k, v in efficiency_metrics.items()}
-    redacted_qual = {redactor.redact(k): v for k, v in quality_metrics.items()}
-
-    insights_list = generate_insights(redacted_eff, redacted_qual, all_blocks, sessions)
-
-    _progress_done()
-    print()
-    print("  Engineering Efficiency Insights")
-    print("  " + "\u2500" * 46)
-    print(format_insights(insights_list))
-    print()
-
-
 def app() -> None:
     parser = argparse.ArgumentParser(
         prog="claude-analytics",
@@ -416,36 +145,11 @@ def app() -> None:
     report_parser.add_argument("--from", dest="from_date", help="Start date (YYYY-MM-DD)")
     report_parser.add_argument("--to", dest="to_date", help="End date (YYYY-MM-DD)")
     report_parser.add_argument("--project", help="Filter by project name")
-    report_parser.add_argument(
-        "--llm", action="store_true",
-        help="Use claude -p to reclassify low-confidence interactions (cached in SQLite)",
-    )
 
     # sessions
     sessions_parser = subparsers.add_parser("sessions", help="List sessions")
     sessions_parser.add_argument("--limit", type=int, default=20, help="Max sessions to show")
     sessions_parser.add_argument("--project", help="Filter by project name")
-
-    # dashboard
-    dash_parser = subparsers.add_parser("dashboard", help="Launch React dashboard")
-    dash_parser.add_argument("--from", dest="from_date", help="Start date (YYYY-MM-DD)")
-    dash_parser.add_argument("--to", dest="to_date", help="End date (YYYY-MM-DD)")
-    dash_parser.add_argument("--project", help="Filter by project name")
-    dash_parser.add_argument("--port", type=int, default=3333, help="Port for dashboard (default: 3333)")
-    dash_parser.add_argument(
-        "--llm", action="store_true",
-        help="Use claude -p to reclassify low-confidence interactions",
-    )
-
-    # insights
-    insights_parser = subparsers.add_parser("insights", help="Show actionable insights")
-    insights_parser.add_argument("--from", dest="from_date", help="Start date (YYYY-MM-DD)")
-    insights_parser.add_argument("--to", dest="to_date", help="End date (YYYY-MM-DD)")
-    insights_parser.add_argument("--project", help="Filter by project name")
-    insights_parser.add_argument(
-        "--llm", action="store_true",
-        help="Use claude -p to reclassify low-confidence interactions",
-    )
 
     args = parser.parse_args()
 
@@ -453,10 +157,6 @@ def app() -> None:
         cmd_report(args)
     elif args.command == "sessions":
         cmd_sessions(args)
-    elif args.command == "dashboard":
-        cmd_dashboard(args)
-    elif args.command == "insights":
-        cmd_insights(args)
     else:
         parser.print_help()
         sys.exit(1)
