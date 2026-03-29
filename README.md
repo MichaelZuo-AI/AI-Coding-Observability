@@ -1,8 +1,18 @@
 # Agent Autonomy Score
 
-A local-first CLI tool that measures how effectively you orchestrate AI coding agents. Parses Claude Code session logs and scores each session by **orchestration precision** — how many corrections you needed after stating your initial intent.
+A [Claude Code skill](https://docs.anthropic.com/en/docs/claude-code) that measures how effectively you orchestrate AI coding agents. Parses session logs and scores each session by **orchestration precision** — how many corrections you needed after stating your initial intent.
 
 ![Agent Autonomy Score Dashboard](docs/dashboard.png)
+
+## Usage
+
+In any Claude Code session, run:
+
+```
+/analytics
+```
+
+The skill auto-detects your current project and generates a precision report with an interactive HTML dashboard saved to `reports/YYYY-MM-DD.html`.
 
 ## How It Works
 
@@ -21,38 +31,26 @@ A session where you say "build X" and the AI delivers with zero corrections scor
 ## Install
 
 ```bash
-# One-liner with pipx (recommended)
-pipx install "git+https://github.com/MichaelZuo-AI/AI-Coding-Observability.git"
-
-# Or with pip
 pip install "git+https://github.com/MichaelZuo-AI/AI-Coding-Observability.git"
-
-# Or from source
-git clone https://github.com/MichaelZuo-AI/AI-Coding-Observability.git
-cd AI-Coding-Observability
-python -m claude_analytics report
 ```
 
-To upgrade: `pipx install --force "git+https://github.com/MichaelZuo-AI/AI-Coding-Observability.git"`
+Then add the skill to your Claude Code config at `~/.claude/skills/analytics/SKILL.md`. See [SKILL.md](https://github.com/MichaelZuo-AI/AI-Coding-Observability/blob/main/.claude/skills/analytics/SKILL.md) for the skill definition.
 
-## Usage
+The CLI also works standalone:
 
 ```bash
-# Full orchestration report
+# Full report
 claude-analytics report
 
 # Filter by date range
 claude-analytics report --from 2026-02-01 --to 2026-02-28
 
 # Filter by project
-claude-analytics report --project MewtwoAI
+claude-analytics report --project MyProject
 
 # List recent sessions
 claude-analytics sessions
-claude-analytics sessions --limit 10
 ```
-
-Each run saves an interactive HTML report to `reports/YYYY-MM-DD.html` — open it in any browser for a styled dashboard with animated metrics, hover tooltips, sortable tables, and collapsible insights.
 
 ## Message Classification
 
@@ -72,6 +70,8 @@ Only `steering` messages count against your precision score. Clarifications and 
 - All processing is **100% local** — no data leaves your machine
 - Session logs are read-only, never modified
 - No API keys required — fully offline
+- Project names are auto-redacted when matching sensitive patterns (financial, medical, etc.)
+- Set `"redact_all": true` in `~/.claude-analytics/privacy.json` to mask all project names
 
 ## Testing
 
