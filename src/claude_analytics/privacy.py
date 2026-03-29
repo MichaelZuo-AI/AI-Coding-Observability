@@ -7,7 +7,8 @@ Configurable via ~/.claude-analytics/privacy.json:
 {
     "private_patterns": ["stock", "portfolio", ...],  // extra patterns
     "private_projects": ["MyBrokerApp"],               // exact project names
-    "show_all": false                                   // set true to disable redaction
+    "show_all": false,                                  // set true to disable redaction
+    "redact_all": false                                 // set true to mask ALL project names
 }
 """
 
@@ -86,17 +87,24 @@ class ProjectRedactor:
     def show_all(self) -> bool:
         return self._config.get("show_all", False)
 
+    @property
+    def redact_all(self) -> bool:
+        return self._config.get("redact_all", False)
+
     def redact(self, project_name: str) -> str:
         """Return the redacted name if private, or the original name if safe."""
         if self.show_all:
             return project_name
 
-        if not is_private_project(project_name, self._config):
+        should_redact = self.redact_all or is_private_project(
+            project_name, self._config
+        )
+        if not should_redact:
             return project_name
 
         if project_name not in self._mapping:
             self._counter += 1
-            self._mapping[project_name] = f"Private-{self._counter}"
+            self._mapping[project_name] = f"Project-{self._counter}"
 
         return self._mapping[project_name]
 
