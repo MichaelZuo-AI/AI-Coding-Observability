@@ -64,6 +64,19 @@ def _bar(fraction: float, category: str, width: int = BAR_WIDTH) -> str:
     return bar_filled + bar_empty
 
 
+def _trend_arrow(current: float, previous: float) -> str:
+    """Return a colored trend arrow comparing current vs previous period."""
+    if previous == 0:
+        return ""
+    pct_change = (current - previous) / previous
+    if pct_change > 0.1:
+        return _c("\033[38;5;82m", "\u2191")   # green up
+    elif pct_change < -0.1:
+        return _c("\033[38;5;203m", "\u2193")  # red down
+    else:
+        return _c("\033[38;5;228m", "\u2192")  # yellow flat
+
+
 def format_codegen_section(
     stats: CodeGenStats,
     project_stats: dict[str, CodeGenStats] | None = None,
@@ -214,6 +227,11 @@ def print_report(
     earliest = min(b.start_time for b in blocks)
     latest = max(b.start_time for b in blocks)
 
+    # Compute half-period totals for trend arrows
+    midpoint = earliest + (latest - earliest) / 2
+    first_half_secs = sum(b.duration_seconds for b in blocks if b.start_time < midpoint)
+    second_half_secs = sum(b.duration_seconds for b in blocks if b.start_time >= midpoint)
+
     user = os.environ.get("USER", "engineer")
     lines: list[str] = []
 
@@ -247,7 +265,9 @@ def print_report(
     lines.append("  " + _c(LINE_COLOR, "\u2500" * 46))
     total_label = _c(BOLD, "Total Active")
     total_dur = _c(BOLD + ACCENT_COLOR, format_duration(total_seconds))
-    lines.append(f"  {total_label:<34}  {_c(ACCENT_COLOR, '100%')}  {total_dur:>5}")
+    trend = _trend_arrow(second_half_secs, first_half_secs)
+    trend_suffix = f" {trend}" if trend else ""
+    lines.append(f"  {total_label:<34}  {_c(ACCENT_COLOR, '100%')}  {total_dur:>5}{trend_suffix}")
     lines.append("")
 
     # Top projects
