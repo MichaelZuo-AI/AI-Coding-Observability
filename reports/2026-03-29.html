@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code Analytics</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:linear-gradient(135deg,#1a1a2e,#16213e);
+  color:#e0e0e0;
+  font-family:system-ui,-apple-system,sans-serif;
+  min-height:100vh;
+  padding:2rem;
+}
+.container{max-width:1100px;margin:0 auto}
+h1{
+  font-size:2.2rem;font-weight:800;
+  background:linear-gradient(135deg,#00d2ff,#7b2ff7);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+  margin-bottom:0.3rem;
+}
+.subtitle{color:#888;font-size:0.95rem;margin-bottom:0.15rem}
+.badge{
+  display:inline-block;background:rgba(255,215,0,0.15);
+  color:#ffd700;border:1px solid rgba(255,215,0,0.3);
+  border-radius:20px;padding:0.2rem 0.8rem;font-size:0.85rem;margin-top:0.4rem;
+}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:1.2rem;margin:1.8rem 0}
+.card{
+  background:rgba(255,255,255,0.04);
+  border-radius:12px;padding:1.5rem;text-align:center;
+  border:1px solid rgba(0,210,255,0.15);
+  box-shadow:0 0 20px rgba(0,210,255,0.05);
+  transition:box-shadow 0.3s;
+}
+.card:hover{box-shadow:0 0 30px rgba(0,210,255,0.15)}
+.card .num{font-size:2.5rem;font-weight:800;color:#00d2ff;line-height:1.1}
+.card .label{font-size:0.85rem;color:#888;margin-top:0.4rem}
+.card .sublabel{font-size:0.75rem;color:#666;margin-top:0.2rem}
+.card:nth-child(2) .num{color:#00ff88}
+.card:nth-child(3) .num{color:#7b2ff7}
+.section-title{font-size:1.1rem;font-weight:700;color:#ccc;margin:1.8rem 0 0.8rem}
+.tier-bar{display:flex;height:28px;border-radius:8px;overflow:hidden;margin-bottom:0.5rem}
+.tier-seg{transition:opacity 0.2s;cursor:default;min-width:2px}
+.tier-seg:hover{opacity:0.8}
+.tier-legend{display:flex;gap:1.2rem;flex-wrap:wrap;margin-bottom:1.5rem}
+.tier-legend span{font-size:0.8rem;color:#aaa;display:flex;align-items:center;gap:0.3rem}
+.tier-legend .dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+.heatmap-wrap{overflow-x:auto;margin:0.5rem 0 1.5rem}
+.heatmap{display:inline-grid;grid-template-rows:repeat(7,1fr);grid-auto-flow:column;gap:3px}
+.hm-cell{width:14px;height:14px;border-radius:3px;cursor:default;transition:transform 0.15s}
+.hm-cell:hover{transform:scale(1.4)}
+.hm-0{background:#1a1a2e}
+.hm-1{background:#0e4429}
+.hm-2{background:#006d32}
+.hm-3{background:#00ff88}
+.day-labels{display:inline-grid;grid-template-rows:repeat(7,1fr);gap:3px;margin-right:6px;vertical-align:top}
+.day-labels span{font-size:0.7rem;color:#666;height:14px;line-height:14px}
+.proj-table{width:100%;border-collapse:collapse;margin:0.5rem 0 1.5rem}
+.proj-table th{
+  text-align:left;padding:0.6rem 0.8rem;color:#888;font-size:0.8rem;
+  border-bottom:1px solid rgba(255,255,255,0.08);cursor:pointer;user-select:none;
+}
+.proj-table th:hover{color:#00d2ff}
+.proj-table td{padding:0.5rem 0.8rem;font-size:0.9rem;border-bottom:1px solid rgba(255,255,255,0.04)}
+.proj-table tr{transition:background 0.2s}
+.proj-table tr:hover{background:rgba(255,255,255,0.03)}
+.tier-border{border-left:3px solid;padding-left:0.8rem}
+.codegen-stats{display:flex;gap:2rem;flex-wrap:wrap;margin:0.5rem 0 1.5rem}
+.cg-stat .val{font-size:1.6rem;font-weight:800;color:#00d2ff}
+.cg-stat .desc{font-size:0.8rem;color:#888}
+.insight-card{
+  background:rgba(255,255,255,0.03);border-radius:8px;margin-bottom:0.6rem;
+  border:1px solid rgba(123,47,247,0.15);overflow:hidden;
+}
+.insight-header{
+  padding:0.7rem 1rem;cursor:pointer;display:flex;justify-content:space-between;align-items:center;
+}
+.insight-header:hover{background:rgba(255,255,255,0.03)}
+.insight-project{font-size:0.85rem;color:#7b2ff7;font-weight:600}
+.insight-toggle{color:#666;font-size:1.1rem;transition:transform 0.2s}
+.insight-card.open .insight-toggle{transform:rotate(45deg)}
+.insight-body{display:none;padding:0 1rem 0.8rem}
+.insight-card.open .insight-body{display:block}
+.insight-obs{font-size:0.9rem;color:#ccc}
+.insight-suggestion{font-size:0.85rem;color:#00ff88;margin-top:0.3rem}
+.tooltip{
+  position:fixed;background:rgba(0,0,0,0.9);color:#fff;padding:0.3rem 0.6rem;
+  border-radius:6px;font-size:0.8rem;pointer-events:none;display:none;z-index:99;
+  border:1px solid rgba(0,210,255,0.3);
+}
+@media(max-width:900px){
+  .cards{grid-template-columns:1fr}
+  body{padding:1rem}
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Claude Code Analytics</h1>
+<div class="subtitle">2026-02-10 ~ 2026-02-10</div>
+<div class="subtitle">Engineer: michaelzuo</div>
+<div class="badge">&#x1F525; 1d current / 1d longest</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="num" data-count="1.00">1.00</div>
+    <div class="label">Precision Score</div>
+    <div class="sublabel">Flawless</div>
+  </div>
+  <div class="card">
+    <div class="num" data-count="100">100%</div>
+    <div class="label">Zero-Touch Rate</div>
+    <div class="sublabel">1/1 sessions</div>
+  </div>
+  <div class="card">
+    <div class="num" data-count="1">1</div>
+    <div class="label">Sessions</div>
+    <div class="sublabel">total analyzed</div>
+  </div>
+</div>
+
+<div class="section-title">Session Breakdown</div>
+<div class="tier-bar">
+<div class="tier-seg" style="width:100.0%;background:#00d2ff" title="Flawless: 1 (100%)"></div>
+</div>
+<div class="tier-legend">
+  <span><span class="dot" style="background:#00d2ff"></span>Flawless 1</span>
+  <span><span class="dot" style="background:#00ff88"></span>Clean 0</span>
+  <span><span class="dot" style="background:#ffd700"></span>Guided 0</span>
+  <span><span class="dot" style="background:#ff4757"></span>Heavy 0</span>
+</div>
+
+<div class="section-title">Activity Heatmap</div>
+<div class="heatmap-wrap">
+  <div style="display:inline-flex">
+    <div class="day-labels">
+      <span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span>
+    </div>
+    <div class="heatmap" id="heatmap"></div>
+  </div>
+</div>
+
+<div class="section-title">Projects by Precision</div>
+<table class="proj-table" id="proj-table">
+<thead><tr>
+  <th data-col="name">Project</th>
+  <th data-col="precision">Precision</th>
+  <th data-col="tier">Tier</th>
+  <th data-col="sessions">Sessions</th>
+</tr></thead>
+<tbody id="proj-tbody"></tbody>
+</table>
+
+
+
+<div class="section-title">Insights</div>
+<div class="insight-card"><div class="insight-header" onclick="this.parentElement.classList.toggle('open')"><span class="insight-project">Overall</span><span class="insight-toggle">+</span></div><div class="insight-body"><p class="insight-obs">100% of sessions needed zero correction.</p><p class="insight-suggestion">Strong intent clarity.</p></div></div>
+
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+(function(){
+  var cells=[{"date": "Feb 09", "dow": 0, "week": 0, "secs": 0, "level": 0, "label": "none"}, {"date": "Feb 10", "dow": 1, "week": 0, "secs": 1800, "level": 1, "label": "30m"}, {"date": "Feb 11", "dow": 2, "week": 0, "secs": 0, "level": 0, "label": "none"}, {"date": "Feb 12", "dow": 3, "week": 0, "secs": 0, "level": 0, "label": "none"}, {"date": "Feb 13", "dow": 4, "week": 0, "secs": 0, "level": 0, "label": "none"}, {"date": "Feb 14", "dow": 5, "week": 0, "secs": 0, "level": 0, "label": "none"}, {"date": "Feb 15", "dow": 6, "week": 0, "secs": 0, "level": 0, "label": "none"}];
+  var grid=document.getElementById("heatmap");
+  if(!cells.length) return;
+  var tip=document.getElementById("tooltip");
+  cells.forEach(function(c){
+    var el=document.createElement("div");
+    el.className="hm-cell hm-"+c.level;
+    el.setAttribute("data-tip",c.date+" \u2014 "+c.label);
+    el.addEventListener("mouseenter",function(e){
+      tip.textContent=this.getAttribute("data-tip");
+      tip.style.display="block";
+      tip.style.left=(e.clientX+10)+"px";
+      tip.style.top=(e.clientY-30)+"px";
+    });
+    el.addEventListener("mousemove",function(e){
+      tip.style.left=(e.clientX+10)+"px";
+      tip.style.top=(e.clientY-30)+"px";
+    });
+    el.addEventListener("mouseleave",function(){tip.style.display="none"});
+    grid.appendChild(el);
+  });
+})();
+
+(function(){
+  var data=[{"name": "test-project", "precision": 1.0, "tier": "Flawless", "sessions": 1}];
+  var tierColors={"Flawless":"#00d2ff","Clean":"#00ff88","Guided":"#ffd700","Heavy":"#ff4757"};
+  var tbody=document.getElementById("proj-tbody");
+  var sortCol="precision",sortAsc=false;
+  function render(){
+    tbody.innerHTML="";
+    var sorted=data.slice().sort(function(a,b){
+      var va=a[sortCol],vb=b[sortCol];
+      if(typeof va==="string"){va=va.toLowerCase();vb=vb.toLowerCase()}
+      if(va<vb)return sortAsc?-1:1;
+      if(va>vb)return sortAsc?1:-1;
+      return 0;
+    });
+    sorted.forEach(function(p){
+      var tr=document.createElement("tr");
+      var c=tierColors[p.tier]||"#888";
+      tr.innerHTML='<td class="tier-border" style="border-left-color:'+c+'">'+p.name+'</td>'
+        +'<td style="font-weight:700;color:'+c+'">'+p.precision.toFixed(2)+'</td>'
+        +'<td style="color:'+c+'">'+p.tier+'</td>'
+        +'<td>'+p.sessions+'</td>';
+      tbody.appendChild(tr);
+    });
+  }
+  document.querySelectorAll("#proj-table th").forEach(function(th){
+    th.addEventListener("click",function(){
+      var col=this.getAttribute("data-col");
+      if(sortCol===col)sortAsc=!sortAsc;
+      else{sortCol=col;sortAsc=true}
+      render();
+    });
+  });
+  render();
+})();
+
+(function(){
+  document.querySelectorAll(".card .num").forEach(function(el){
+    var final=el.textContent;
+    var isPercent=final.indexOf("%")>=0;
+    var target=parseFloat(final);
+    if(isNaN(target))return;
+    var isFloat=final.indexOf(".")>=0&&!isPercent;
+    var duration=800,start=performance.now();
+    function step(now){
+      var t=Math.min((now-start)/duration,1);
+      t=t<0.5?2*t*t:(1-Math.pow(-2*t+2,2)/2);
+      var v=t*target;
+      el.textContent=isFloat?v.toFixed(2):Math.round(v)+(isPercent?"%":"");
+      if(t<1)requestAnimationFrame(step);
+      else el.textContent=final;
+    }
+    el.textContent=isFloat?"0.00":"0"+(isPercent?"%":"");
+    requestAnimationFrame(step);
+  });
+})();
+</script>
+</body>
+</html>

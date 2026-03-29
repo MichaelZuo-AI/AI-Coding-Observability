@@ -88,6 +88,8 @@ claude-analytics sessions
 claude-analytics sessions --limit 10
 ```
 
+Each run saves an interactive HTML report to `reports/YYYY-MM-DD.html` — open it in any browser for a styled dashboard with animated metrics, hover tooltips, sortable tables, and collapsible insights.
+
 ## Message Classification
 
 Each user message after the initial prompt is classified:
